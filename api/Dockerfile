@@ -12,6 +12,7 @@ RUN go mod download
 # Copy source code
 COPY api/ ./api/
 COPY database/ ./database/
+COPY plaid/ ./plaid/
 
 # Build the API binary
 RUN GOOS=linux GOARCH=amd64 go build -o main ./api

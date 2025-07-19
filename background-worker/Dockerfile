@@ -12,6 +12,7 @@ RUN go mod download
 # Copy source code
 COPY background-worker/ ./background-worker/
 COPY database/ ./database/
+COPY plaid/ ./plaid/
 
 # Build the worker binary
 RUN GOOS=linux GOARCH=amd64 go build -o worker ./background-worker
