@@ -1,0 +1,63 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+*.md
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build artifacts
+bin/
+dist/
+build/
+
+# Node modules (if any)
+node_modules/
+
+# Docker files (except the one being used)
+Dockerfile*
+docker-compose*.yml
+
+# Scripts (not needed in container)
+scripts/
+
+# Old directories
+old/
+backend/
+frontend/
+
+# Test files
+*_test.go
+test/
+
+# Temporary files
+tmp/
+temp/
+
+# Environment files (will be passed as build args)
+.env
+.env.*
+
+# Database files
+*.db
+*.sqlite
+
+# Certificates (if not needed)
+certs/
+
+# Docker images
+*.tar
+*.tar.gz 

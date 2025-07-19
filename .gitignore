@@ -1,0 +1,23 @@
+.DS_Store
+/node_modules/
+
+# React Router
+/.react-router/
+/build/
+
+.env*
+node_modules/
+.vs_code/
+launch.json
+.vscode/launch.json
+
+backend/node_modules/*
+frontend/node_modules/
+frontend/build/
+certs/
+
+# Local Netlify folder
+.netlify
+scripts/generate_jwt_secret.sh
+
+old/

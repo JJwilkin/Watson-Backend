@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # Redis service
+  redis:
+    image: redis:7-alpine
+    container_name: watson-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Main API server
+  api:
+    image: us-central1-docker.pkg.dev/watson-465400/watson-registry/watson-go-api:latest
+    container_name: watson-api
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      - SERVER_PORT=8080
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./certs:/app/certs:ro
+    restart: unless-stopped
+
+  # Background worker
+  worker:
+    image: us-central1-docker.pkg.dev/watson-465400/watson-registry/watson-worker:latest
+    container_name: watson-worker
+    ports:
+      - "8081:8081"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      - WORKER_PORT=8081
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redis_data:
