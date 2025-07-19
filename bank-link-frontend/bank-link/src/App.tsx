@@ -7,13 +7,12 @@ type LinkProvider = 'teller' | 'plaid' | null;
 
 function App() {
   const [jwt, setJwt] = useState<string | null>(null)
-  const [userId, setUserId] = useState<string>('123')
   const [selectedProvider, setSelectedProvider] = useState<LinkProvider>(null)
   const [status, setStatus] = useState<'loading' | 'success' | 'error' | null>(null)
   const [message, setMessage] = useState<string>('')
 
   useEffect(() => {
-    // Extract JWT and userId from URL parameters
+    // Extract JWT from URL parameters
     const urlParams = new URLSearchParams(window.location.search)
     const jwtFromUrl = urlParams.get('jwt')
     
@@ -160,11 +159,10 @@ function App() {
       )}
       
       {/* Plaid Link */}
-      {jwt && selectedProvider === 'plaid' && status === null && userId && (
+      {jwt && selectedProvider === 'plaid' && status === null && (
         <PlaidLink 
           onSuccess={handlePlaidSuccess}
           onExit={handlePlaidExit}
-          userId={userId}
           jwt={jwt}
         />
       )}

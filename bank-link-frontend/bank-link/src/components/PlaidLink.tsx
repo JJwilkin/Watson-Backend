@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   usePlaidLink,
   type PlaidLinkOptions,
@@ -8,11 +8,10 @@ import {
 interface PlaidLinkProps {
   onSuccess: (publicToken: string, metadata: any) => void;
   onExit?: (error: any, metadata: any) => void;
-  userId: string;
   jwt: string;
 }
 
-export default function PlaidLink({ onSuccess, onExit, userId, jwt }: PlaidLinkProps) {
+export default function PlaidLink({ onSuccess, onExit, jwt }: PlaidLinkProps) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,10 +44,10 @@ export default function PlaidLink({ onSuccess, onExit, userId, jwt }: PlaidLinkP
       }
     };
 
-    if (userId && jwt) {
+    if (jwt) {
       fetchLinkToken();
     }
-  }, [userId, jwt]);
+  }, [jwt]);
 
   const handleOnSuccess: PlaidLinkOnSuccess = useCallback(
     (publicToken, metadata) => {
