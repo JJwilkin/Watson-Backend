@@ -40,10 +40,13 @@ type TransactionRequest struct {
 	TransactionDate time.Time `json:"transaction_date" binding:"required"`
 }
 
+var workerUrl string
+
 // AUTH
 
 func login(c *gin.Context) {
 	var user User
+	log.Printf("Worker URL: %s", workerUrl)
 	if err := c.ShouldBindJSON(&user); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "Invalid request body",
@@ -244,7 +247,7 @@ func handleTellerSuccess(c *gin.Context) {
 		log.Printf("Failed to marshal enqueue request: %v", err)
 	} else {
 		// Make HTTP request to background worker
-		resp, err := http.Post("http://localhost:8081/enqueue", "application/json", bytes.NewBuffer(enqueueJSON))
+		resp, err := http.Post(workerUrl+"/enqueue", "application/json", bytes.NewBuffer(enqueueJSON))
 		// resp, err := http.Post("http://worker:8081/enqueue", "application/json", bytes.NewBuffer(enqueueJSON))
 		if err != nil {
 			log.Printf("Failed to enqueue job: %v", err)
@@ -332,7 +335,7 @@ func handlePlaidSuccess(c *gin.Context) {
 	}
 
 	// Make HTTP request to background worker
-	resp, err := http.Post("http://localhost:8081/enqueue", "application/json", bytes.NewBuffer(enqueueJSON))
+	resp, err := http.Post(workerUrl+"/enqueue", "application/json", bytes.NewBuffer(enqueueJSON))
 	// resp, err := http.Post("http://worker:8081/enqueue", "application/json", bytes.NewBuffer(enqueueJSON))
 	if err != nil {
 		log.Printf("Failed to enqueue job: %v", err)
@@ -641,6 +644,11 @@ func main() {
 	dbConnStr := os.Getenv("DATABASE_URL")
 	if dbConnStr == "" {
 		dbConnStr = "postgres://postgres:password@localhost:5432/watson?sslmode=disable" // fallback
+	}
+
+	workerUrl = os.Getenv("WORKER_URL")
+	if workerUrl == "" {
+		workerUrl = "http://localhost:8081"
 	}
 
 	plaid.InitPlaid()

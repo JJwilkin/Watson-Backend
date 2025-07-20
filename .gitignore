@@ -21,3 +21,4 @@ certs/
 scripts/generate_jwt_secret.sh
 
 old/
+setup_vm_script.sh
