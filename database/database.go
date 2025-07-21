@@ -573,6 +573,16 @@ func CreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
 	return &monthlySummary, nil
 }
 
+func HasAnyMonthlySummaries(userID int) (bool, error) {
+	var count int
+	query := "SELECT COUNT(*) FROM monthly_summary WHERE user_id = $1"
+	err := DB.QueryRow(query, userID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("failed to count monthly summaries: %v", err)
+	}
+	return count > 0, nil
+}
+
 func GetMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
 	query := "SELECT id, user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested, created_at, updated_at FROM monthly_summary WHERE user_id = $1 AND monthyear = $2"
 	var monthlySummary MonthlySummary
@@ -607,6 +617,16 @@ func GetOrCreateMonthlyBalance(userID int, monthYear int) (*MonthlyBalance, erro
 		return nil, fmt.Errorf("failed to create monthly balance: %v", err)
 	}
 	return monthlyBalance, nil
+}
+
+func HasAnyMonthlyBalances(userID int) (bool, error) {
+	var count int
+	query := "SELECT COUNT(*) FROM monthly_balance WHERE user_id = $1"
+	err := DB.QueryRow(query, userID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("failed to count monthly balances: %v", err)
+	}
+	return count > 0, nil
 }
 
 func GetMonthlyBalance(userID int, monthYear int) (*MonthlyBalance, error) {

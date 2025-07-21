@@ -116,6 +116,30 @@ func register(c *gin.Context) {
 	})
 }
 
+func isNewUser(c *gin.Context) {
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+	hasAnyMonthlySummaries, err := database.HasAnyMonthlySummaries(userIdInt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to check if user has any monthly summaries",
+		})
+		return
+	}
+	hasAnyMonthlyBalances, err := database.HasAnyMonthlyBalances(userIdInt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to check if user has any monthly balances",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"is_new_user": !hasAnyMonthlySummaries && !hasAnyMonthlyBalances,
+	})
+}
+
 func getBalance(c *gin.Context) {
 	userIdInt, err := AuthMiddleware(c)
 	if err != nil {
@@ -401,6 +425,41 @@ func getPlaidAccounts(c *gin.Context) {
 
 // ** MONTHLY SUMMARY **
 
+func hasAnyMonthlySummaries(c *gin.Context) {
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+	hasAnyMonthlySummaries, err := database.HasAnyMonthlySummaries(userIdInt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to check if user has any monthly summaries",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"has_any_monthly_summaries": hasAnyMonthlySummaries,
+	})
+}
+
+func getMonthlySummaryOrEmpty(c *gin.Context) {
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+	monthYear := GetCurrentMonthYear()
+	monthlySummary, err := database.GetMonthlySummary(userIdInt, monthYear)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"monthly_summary": nil,
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"monthly_summary": monthlySummary,
+	})
+}
+
 func getOrCreateMonthlySummary(c *gin.Context) {
 	userIdInt, err := AuthMiddleware(c)
 	if err != nil {
@@ -491,6 +550,42 @@ func updateMonthlySummary(c *gin.Context) {
 }
 
 // ** MONTHLY BALANCE **
+
+func hasAnyMonthlyBalances(c *gin.Context) {
+
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+	hasAnyMonthlyBalances, err := database.HasAnyMonthlyBalances(userIdInt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to check if user has any monthly balances",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"has_any_monthly_balances": hasAnyMonthlyBalances,
+	})
+}
+
+func getMonthlyBalanceOrEmpty(c *gin.Context) {
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+	monthYear := GetCurrentMonthYear()
+	monthlyBalance, err := database.GetMonthlyBalance(userIdInt, monthYear)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"monthly_balance": nil,
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"monthly_balance": monthlyBalance,
+	})
+}
 
 func getOrCreateMonthlyBalance(c *gin.Context) {
 	userIdInt, err := AuthMiddleware(c)
@@ -675,6 +770,10 @@ func main() {
 	router.GET("/users/", getUser)
 	router.GET("/balances", getBalance)
 	router.POST("/login", login)
+
+	// User
+	router.GET("/user/is-new", isNewUser)
+
 	// Bank
 	router.GET("/bank-link", genereateBankLink)
 	router.POST("/bank-link-teller/success", handleTellerSuccess)
@@ -683,10 +782,12 @@ func main() {
 	router.GET("/plaid/transactions", getPlaidTransactions)
 	router.GET("/plaid/accounts", getPlaidAccounts)
 	// Monthly Summary
-	router.GET("/monthly-summary", getOrCreateMonthlySummary)
+	router.GET("/monthly-summary", getMonthlySummaryOrEmpty)
+	router.GET("/monthly-summary/has-any", hasAnyMonthlySummaries)
 	router.PUT("/monthly-summary", updateMonthlySummary)
 	// Monthly Balance
-	router.GET("/monthly-balance", getOrCreateMonthlyBalance)
+	router.GET("/monthly-balance", getMonthlyBalanceOrEmpty)
+	router.GET("/monthly-balance/has-any", hasAnyMonthlyBalances)
 	router.PUT("/monthly-balance", updateMonthlyBalance)
 
 	//Saving Goals
