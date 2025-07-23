@@ -58,9 +58,9 @@ type TellerPayload struct {
 
 // Monthly Summary
 type BudgetCategory struct {
-	Category      string                 `json:"category"`
-	Amount        float64                `json:"amount"`
-	SubCategories map[string]interface{} `json:"sub_categories"`
+	Category      string                   `json:"category"`
+	Amount        float64                  `json:"amount"`
+	SubCategories []map[string]interface{} `json:"sub_categories"`
 }
 
 type MonthlySummary struct {
@@ -563,7 +563,7 @@ func CreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
 		{
 			Category:      "general",
 			Amount:        0.0,
-			SubCategories: map[string]interface{}{},
+			SubCategories: []map[string]interface{}{},
 		},
 	}
 	budgetJSON, _ := json.Marshal(defaultBudget)
