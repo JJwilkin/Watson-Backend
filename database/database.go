@@ -64,17 +64,19 @@ type BudgetCategory struct {
 }
 
 type MonthlySummary struct {
-	ID              int             `json:"id"`
-	UserID          int             `json:"user_id"`
-	MonthYear       int             `json:"monthyear"`
-	TotalSpent      float64         `json:"total_spent"`
-	Budget          json.RawMessage `json:"budget"`
-	StartingBalance float64         `json:"starting_balance"`
-	Income          float64         `json:"income"`
-	SavedAmount     float64         `json:"saved_amount"`
-	Invested        float64         `json:"invested"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
+	ID                     int             `json:"id"`
+	UserID                 int             `json:"user_id"`
+	MonthYear              int             `json:"monthyear"`
+	TotalSpent             float64         `json:"total_spent"`
+	Budget                 json.RawMessage `json:"budget"`
+	FixedExpenses          float64         `json:"fixed_expenses"`
+	SavingTargetPercentage float64         `json:"saving_target_percentage"`
+	StartingBalance        float64         `json:"starting_balance"`
+	Income                 float64         `json:"income"`
+	SavedAmount            float64         `json:"saved_amount"`
+	Invested               float64         `json:"invested"`
+	CreatedAt              time.Time       `json:"created_at"`
+	UpdatedAt              time.Time       `json:"updated_at"`
 }
 
 // Monthly Balance
@@ -543,11 +545,11 @@ func CreatePlaidTransactions(userID int, accountID string, transactions []plaid.
 // ********** MONTHLY SUMMARY **********
 
 func GetOrCreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
-	monthlySummary, err := GetMonthlySummary(userID, monthYear)
+	monthlySummary, _ := GetMonthlySummary(userID, monthYear)
 	if monthlySummary != nil {
 		return monthlySummary, nil
 	}
-	monthlySummary, err = CreateMonthlySummary(userID, monthYear)
+	monthlySummary, err := CreateMonthlySummary(userID, monthYear)
 	if err != nil {
 		log.Printf("Failed to create monthly summary: %v", err)
 		return nil, fmt.Errorf("failed to create monthly summary: %v", err)
@@ -555,7 +557,7 @@ func GetOrCreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, erro
 	return monthlySummary, nil
 }
 func CreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
-	query := "INSERT INTO monthly_summary (user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested, created_at, updated_at"
+	query := "INSERT INTO monthly_summary (user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at"
 	var monthlySummary MonthlySummary
 	defaultBudget := []BudgetCategory{
 		{
@@ -565,7 +567,7 @@ func CreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
 		},
 	}
 	budgetJSON, _ := json.Marshal(defaultBudget)
-	err := DB.QueryRow(query, userID, monthYear, 0.0, budgetJSON, 0.0, 0.0, 0.0, 0.0).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.Budget, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
+	err := DB.QueryRow(query, userID, monthYear, 0.0, budgetJSON, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.Budget, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.FixedExpenses, &monthlySummary.SavingTargetPercentage, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
 	if err != nil {
 		log.Printf("Failed to create monthly summary: %v", err)
 		return nil, fmt.Errorf("failed to create monthly summary: %v", err)
@@ -584,9 +586,9 @@ func HasAnyMonthlySummaries(userID int) (bool, error) {
 }
 
 func GetMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
-	query := "SELECT id, user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested, created_at, updated_at FROM monthly_summary WHERE user_id = $1 AND monthyear = $2"
+	query := "SELECT id, user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at FROM monthly_summary WHERE user_id = $1 AND monthyear = $2"
 	var monthlySummary MonthlySummary
-	err := DB.QueryRow(query, userID, monthYear).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.Budget, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
+	err := DB.QueryRow(query, userID, monthYear).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.Budget, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.FixedExpenses, &monthlySummary.SavingTargetPercentage, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
 	if err != nil {
 		log.Printf("Failed to get monthly summary: %v", err)
 		return nil, fmt.Errorf("failed to get monthly summary: %v", err)
@@ -594,10 +596,10 @@ func GetMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
 	return &monthlySummary, nil
 }
 
-func UpdateMonthlySummary(userID int, monthYear int, totalSpent float64, budget json.RawMessage, startingBalance float64, income float64, savedAmount float64, invested float64) (*MonthlySummary, error) {
-	query := "UPDATE monthly_summary SET total_spent = $1, budget = $2, starting_balance = $3, income = $4, saved_amount = $5, invested = $6 WHERE user_id = $7 AND monthyear = $8 RETURNING id, user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested, created_at, updated_at"
+func UpdateMonthlySummary(userID int, monthYear int, totalSpent float64, budget json.RawMessage, startingBalance float64, income float64, savedAmount float64, invested float64, fixedExpenses float64, savingTargetPercentage float64) (*MonthlySummary, error) {
+	query := "UPDATE monthly_summary SET total_spent = $1, budget = $2, starting_balance = $3, income = $4, saved_amount = $5, invested = $6, fixed_expenses = $7, saving_target_percentage = $8 WHERE user_id = $9 AND monthyear = $10 RETURNING id, user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at"
 	var monthlySummary MonthlySummary
-	err := DB.QueryRow(query, totalSpent, budget, startingBalance, income, savedAmount, invested, userID, monthYear).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.Budget, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
+	err := DB.QueryRow(query, totalSpent, budget, startingBalance, income, savedAmount, invested, fixedExpenses, savingTargetPercentage, userID, monthYear).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.Budget, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.FixedExpenses, &monthlySummary.SavingTargetPercentage, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update monthly summary: %v", err)
 	}

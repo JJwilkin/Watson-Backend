@@ -537,7 +537,17 @@ func updateMonthlySummary(c *gin.Context) {
 		invested = val.(float64)
 	}
 
-	monthlySummary, err = database.UpdateMonthlySummary(userIdInt, monthYear, totalSpent, budget, startingBalance, income, savedAmount, invested)
+	fixedExpenses := monthlySummary.FixedExpenses
+	if val, exists := payload["fixed_expenses"]; exists {
+		fixedExpenses = val.(float64)
+	}
+
+	savingTargetPercentage := monthlySummary.SavingTargetPercentage
+	if val, exists := payload["saving_target_percentage"]; exists {
+		savingTargetPercentage = val.(float64)
+	}
+
+	monthlySummary, err = database.UpdateMonthlySummary(userIdInt, monthYear, totalSpent, budget, startingBalance, income, savedAmount, invested, fixedExpenses, savingTargetPercentage)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to update monthly summary",
