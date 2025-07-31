@@ -1,0 +1,1 @@
+ALTER TABLE monthly_budget_spend_category ADD COLUMN daily_allowance FLOAT;

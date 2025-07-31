@@ -83,7 +83,7 @@ func CreateLinkToken(userIdInt int) (string, error) {
 	request := plaid.NewLinkTokenCreateRequest(
 		"Watson",
 		"en",
-		[]plaid.CountryCode{plaid.COUNTRYCODE_CA},
+		[]plaid.CountryCode{plaid.COUNTRYCODE_CA, plaid.COUNTRYCODE_US},
 		*plaid.NewLinkTokenCreateRequestUser(strconv.Itoa(userIdInt)),
 	)
 	request.SetProducts([]plaid.Products{plaid.PRODUCTS_TRANSACTIONS})

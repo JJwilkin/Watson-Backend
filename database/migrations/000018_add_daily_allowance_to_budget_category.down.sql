@@ -1,0 +1,1 @@
+ALTER TABLE monthly_budget_spend_category DROP COLUMN daily_allowance;

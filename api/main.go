@@ -448,28 +448,94 @@ func getMonthlySummaryOrEmpty(c *gin.Context) {
 		return // AuthMiddleware already sent the response
 	}
 	monthYear := GetCurrentMonthYear()
+	if val, exists := c.GetQuery("month_year"); exists {
+		if parsed, err := strconv.Atoi(val); err == nil {
+			monthYear = parsed
+		}
+	}
 	monthlySummary, err := database.GetMonthlySummary(userIdInt, monthYear)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
-			"monthly_summary": nil,
+			"monthly_summary":                 nil,
+			"monthly_budget_spend_categories": nil,
+		})
+		return
+	}
+	monthlyBudgetSpendCategories, err := database.GetMonthlyBudgetSpendCategories(monthlySummary.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to get monthly budget spend categories",
 		})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"monthly_summary": monthlySummary,
+		"monthly_summary":                 monthlySummary,
+		"monthly_budget_spend_categories": monthlyBudgetSpendCategories,
 	})
 }
 
-func getOrCreateMonthlySummary(c *gin.Context) {
+// func getOrCreateMonthlySummary(c *gin.Context) {
+// 	userIdInt, err := AuthMiddleware(c)
+// 	if err != nil {
+// 		return // AuthMiddleware already sent the response
+// 	}
+// 	monthYear := GetCurrentMonthYear()
+// 	monthlySummary, err := database.GetOrCreateMonthlySummary(userIdInt, monthYear)
+// 	if err != nil {
+// 		c.JSON(http.StatusInternalServerError, gin.H{
+// 			"error": "Failed to get or create monthly summary",
+// 		})
+// 		return
+// 	}
+// 	c.JSON(http.StatusOK, gin.H{
+// 		"monthly_summary": monthlySummary,
+// 	})
+// }
+
+// ** CREATE MONTHLY SUMMARY **
+// INPUT:
+//
+//	{
+//		"month_year": 62025,
+//		"income": 10000,
+//		"starting_balance": 1000,
+//		"saved_amount": 100,
+//		"invested": 100,
+//		"fixed_expenses": 100,
+//		"saving_target_percentage": 10,
+//		"budget": 1000
+//	}
+func createMonthlySummary(c *gin.Context) {
 	userIdInt, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
+
+	var payload map[string]interface{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request body",
+		})
+		return
+	}
+
 	monthYear := GetCurrentMonthYear()
-	monthlySummary, err := database.GetOrCreateMonthlySummary(userIdInt, monthYear)
+	if monthYearFromPayload, exists := payload["month_year"]; exists {
+		monthYear = int(monthYearFromPayload.(float64))
+	}
+
+	income := payload["income"].(float64)
+	startingBalance := payload["starting_balance"].(float64)
+	savedAmount := payload["saved_amount"].(float64)
+	invested := payload["invested"].(float64)
+	fixedExpenses := payload["fixed_expenses"].(float64)
+	savingTargetPercentage := payload["saving_target_percentage"].(float64)
+	budget := payload["budget"].(float64)
+
+	monthlySummary, err := database.CreateMonthlySummary(userIdInt, monthYear, 0.0, startingBalance, income, savedAmount, invested, fixedExpenses, savingTargetPercentage, budget)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to get or create monthly summary",
+			"error": "Failed to create monthly summary",
 		})
 		return
 	}
@@ -497,10 +563,10 @@ func updateMonthlySummary(c *gin.Context) {
 		monthYear = int(monthYearFromPayload.(float64))
 	}
 
-	monthlySummary, err := database.GetOrCreateMonthlySummary(userIdInt, monthYear)
+	monthlySummary, err := database.GetMonthlySummary(userIdInt, monthYear)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to get or create monthly summary",
+			"error": "Failed to get monthly summary",
 		})
 		return
 	}
@@ -509,12 +575,6 @@ func updateMonthlySummary(c *gin.Context) {
 	totalSpent := monthlySummary.TotalSpent
 	if val, exists := payload["total_spent"]; exists {
 		totalSpent = val.(float64)
-	}
-
-	budget := monthlySummary.Budget
-	if val, exists := payload["budget"]; exists {
-		budgetJSON, _ := json.Marshal(val)
-		budget = budgetJSON
 	}
 
 	startingBalance := monthlySummary.StartingBalance
@@ -547,7 +607,7 @@ func updateMonthlySummary(c *gin.Context) {
 		savingTargetPercentage = val.(float64)
 	}
 
-	monthlySummary, err = database.UpdateMonthlySummary(userIdInt, monthYear, totalSpent, budget, startingBalance, income, savedAmount, invested, fixedExpenses, savingTargetPercentage)
+	monthlySummary, err = database.UpdateMonthlySummary(userIdInt, monthYear, totalSpent, startingBalance, income, savedAmount, invested, fixedExpenses, savingTargetPercentage)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to update monthly summary",
@@ -679,6 +739,49 @@ func updateMonthlyBalance(c *gin.Context) {
 	})
 }
 
+// ** MONTHLY BUDGET SPEND CATEGORY **
+
+func createMonthlyBudgetSpendCategory(c *gin.Context) {
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+
+	var payload map[string]interface{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request body",
+		})
+		return
+	}
+
+	monthYear := GetCurrentMonthYear()
+	if monthYearFromPayload, exists := payload["month_year"]; exists {
+		monthYear = int(monthYearFromPayload.(float64))
+	}
+
+	monthlySummary, err := database.GetMonthlySummary(userIdInt, monthYear)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to get or create monthly summary",
+		})
+		return
+	}
+	category := payload["category"].(string)
+	budget := payload["budget"].(float64)
+
+	monthlyBudgetSpendCategory, err := database.CreateMonthlyBudgetSpendCategory(userIdInt, monthlySummary.ID, monthYear, category, budget)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to create monthly budget spend category",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"monthly_budget_spend_category": monthlyBudgetSpendCategory,
+	})
+}
+
 // ** SAVING GOALS **
 
 func getSavingGoals(c *gin.Context) {
@@ -726,6 +829,96 @@ func createSavingGoal(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"savings_goal": savingsGoal,
+	})
+}
+
+// ** TRANSACTIONS **
+func processDailyBalance(c *gin.Context) {
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+	var payload map[string]interface{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request body",
+		})
+		return
+	}
+	monthYear := GetCurrentMonthYear()
+	if monthYearFromPayload, exists := payload["month_year"]; exists {
+		monthYear = int(monthYearFromPayload.(float64))
+	}
+
+	jobData := map[string]interface{}{
+		"user_id":    userIdInt,
+		"month_year": monthYear,
+	}
+
+	enqueueRequest := map[string]interface{}{
+		"type": "process_daily_balance",
+		"data": jobData,
+	}
+
+	enqueueJSON, err := json.Marshal(enqueueRequest)
+	if err != nil {
+		log.Printf("Failed to marshal enqueue request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to marshal enqueue request",
+		})
+		return
+	}
+
+	// Make HTTP request to background worker
+	resp, err := http.Post(workerUrl+"/enqueue", "application/json", bytes.NewBuffer(enqueueJSON))
+	// resp, err := http.Post("http://worker:8081/enqueue", "application/json", bytes.NewBuffer(enqueueJSON))
+	if err != nil {
+		log.Printf("Failed to enqueue job: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to enqueue job",
+		})
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		log.Printf("Successfully enqueued transaction processing job for user %d", userIdInt)
+	} else {
+		log.Printf("Failed to enqueue job, status: %d", resp.StatusCode)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to enqueue job",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Successfully enqueued transaction processing job for user " + strconv.Itoa(userIdInt),
+	})
+}
+
+func getTransactionsByCategory(c *gin.Context) {
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+	category := c.Query("category")
+	if category == "" {
+		category = "general"
+	}
+	monthYearStr := c.Query("monthyear")
+	monthYear := GetCurrentMonthYear()
+	if monthYearStr != "" {
+		if parsed, err := strconv.Atoi(monthYearStr); err == nil {
+			monthYear = parsed
+		}
+	}
+	transactions, err := database.GetTransactionsByCategory(userIdInt, category, monthYear)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to get transactions by category",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"transactions": transactions,
 	})
 }
 
@@ -794,11 +987,19 @@ func main() {
 	// Monthly Summary
 	router.GET("/monthly-summary", getMonthlySummaryOrEmpty)
 	router.GET("/monthly-summary/has-any", hasAnyMonthlySummaries)
+	router.POST("/monthly-summary", createMonthlySummary)
 	router.PUT("/monthly-summary", updateMonthlySummary)
 	// Monthly Balance
 	router.GET("/monthly-balance", getMonthlyBalanceOrEmpty)
 	router.GET("/monthly-balance/has-any", hasAnyMonthlyBalances)
 	router.PUT("/monthly-balance", updateMonthlyBalance)
+
+	// Monthly Budget Spend Category
+	router.POST("/monthly-budget-spend-category", createMonthlyBudgetSpendCategory)
+
+	// Transactions
+	router.POST("/transactions/process-daily-balance", processDailyBalance)
+	router.GET("/transactions/by-category", getTransactionsByCategory)
 
 	//Saving Goals
 	router.GET("/saving-goals", getSavingGoals)

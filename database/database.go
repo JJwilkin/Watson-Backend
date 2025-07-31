@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 	plaid "github.com/plaid/plaid-go/v31/plaid"
 )
@@ -24,11 +25,16 @@ type DBUser struct {
 
 // Transaction represents a transaction in the database
 type Transaction struct {
-	TransactionID   int       `json:"transaction_id"`
+	TransactionID   string    `json:"transaction_id"`
 	UserID          int       `json:"user_id"`
 	Description     string    `json:"description"`
 	Amount          float64   `json:"amount"`
 	TransactionDate time.Time `json:"transaction_date"`
+	Category        string    `json:"category"`
+	Currency        string    `json:"currency"`
+	Status          string    `json:"status"`
+	Type            string    `json:"type"`
+	ProviderType    string    `json:"provider_type"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
@@ -56,27 +62,32 @@ type TellerPayload struct {
 	Signatures []string `json:"signatures"`
 }
 
-// Monthly Summary
-type BudgetCategory struct {
-	Category      string                   `json:"category"`
-	Amount        float64                  `json:"amount"`
-	SubCategories []map[string]interface{} `json:"sub_categories"`
+type MonthlySummary struct {
+	ID                     int       `json:"id"`
+	UserID                 int       `json:"user_id"`
+	MonthYear              int       `json:"monthyear"`
+	TotalSpent             float64   `json:"total_spent"`
+	FixedExpenses          float64   `json:"fixed_expenses"`
+	SavingTargetPercentage float64   `json:"saving_target_percentage"`
+	StartingBalance        float64   `json:"starting_balance"`
+	Income                 float64   `json:"income"`
+	SavedAmount            float64   `json:"saved_amount"`
+	Invested               float64   `json:"invested"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
-type MonthlySummary struct {
-	ID                     int             `json:"id"`
-	UserID                 int             `json:"user_id"`
-	MonthYear              int             `json:"monthyear"`
-	TotalSpent             float64         `json:"total_spent"`
-	Budget                 json.RawMessage `json:"budget"`
-	FixedExpenses          float64         `json:"fixed_expenses"`
-	SavingTargetPercentage float64         `json:"saving_target_percentage"`
-	StartingBalance        float64         `json:"starting_balance"`
-	Income                 float64         `json:"income"`
-	SavedAmount            float64         `json:"saved_amount"`
-	Invested               float64         `json:"invested"`
-	CreatedAt              time.Time       `json:"created_at"`
-	UpdatedAt              time.Time       `json:"updated_at"`
+type MonthlyBudgetSpendCategory struct {
+	ID               string    `json:"id"`
+	UserID           int       `json:"user_id"`
+	MonthlySummaryID int       `json:"monthly_summary_id"`
+	MonthYear        int       `json:"monthyear"`
+	Category         string    `json:"category"`
+	Budget           float64   `json:"budget"`
+	DailyAllowance   float64   `json:"daily_allowance"`
+	TotalSpent       float64   `json:"total_spent"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // Monthly Balance
@@ -503,12 +514,18 @@ func CreatePlaidTransactions(userID int, accountID string, transactions []plaid.
 		placeholders = append(placeholders, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
 			start+1, start+2, start+3, start+4, start+5, start+6, start+7, start+8, start+9, start+10, start+11))
 
-		// Handle empty category array
-		var category string
-		if categories := transaction.GetCategory(); len(categories) > 0 {
-			category = categories[0]
+		// Handle category array - convert to JSONB format
+		categorySlice := transaction.GetCategory()
+		var category interface{}
+		if len(categorySlice) == 0 {
+			category = "[]" // Empty array as JSON string
 		} else {
-			category = ""
+			// Convert slice to JSON string for JSONB insertion
+			categoryJSON, err := json.Marshal(categorySlice)
+			if err != nil {
+				return fmt.Errorf("failed to marshal category: %v", err)
+			}
+			category = string(categoryJSON)
 		}
 
 		var status string
@@ -544,33 +561,115 @@ func CreatePlaidTransactions(userID int, accountID string, transactions []plaid.
 
 // ********** MONTHLY SUMMARY **********
 
-func GetOrCreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
-	monthlySummary, _ := GetMonthlySummary(userID, monthYear)
-	if monthlySummary != nil {
-		return monthlySummary, nil
+func GetTransactionsExcludingCategories(userID int, categoriesToExclude []string, monthYear int) ([]Transaction, error) {
+	year := monthYear % 10000
+	month := monthYear / 10000
+	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+	endDate := startDate.AddDate(0, 1, 0)
+	log.Printf("Getting transactions for user %d, categories to exclude %v, month %d", userID, categoriesToExclude, monthYear)
+	log.Printf("Start date: %s, End date: %s", startDate, endDate)
+	// Build the query to exclude transactions that contain any of the specified categories
+	query := "SELECT id, user_id, amount, date, description, category, currency, status, type, provider_type FROM transactions WHERE user_id = $1 AND date BETWEEN $2 AND $3"
+
+	var rows *sql.Rows
+	var err error
+
+	// If there are categories to exclude, add the exclusion condition
+	if len(categoriesToExclude) > 0 {
+		query += " AND NOT (category ?| $4::text[])"
+		// Convert []string to pq.StringArray for PostgreSQL
+		rows, err = DB.Query(query, userID, startDate, endDate, pq.Array(categoriesToExclude))
+	} else {
+		// If no categories to exclude, just get all transactions
+		rows, err = DB.Query(query, userID, startDate, endDate)
 	}
-	monthlySummary, err := CreateMonthlySummary(userID, monthYear)
 	if err != nil {
-		log.Printf("Failed to create monthly summary: %v", err)
-		return nil, fmt.Errorf("failed to create monthly summary: %v", err)
+		log.Printf("Failed to query transactions: %v", err)
+		return nil, fmt.Errorf("failed to query transactions: %v", err)
 	}
-	return monthlySummary, nil
+	defer rows.Close()
+	var transactions []Transaction
+	for rows.Next() {
+		var transaction Transaction
+		err := rows.Scan(&transaction.TransactionID, &transaction.UserID, &transaction.Amount, &transaction.TransactionDate, &transaction.Description, &transaction.Category, &transaction.Currency, &transaction.Status, &transaction.Type, &transaction.ProviderType)
+		if err != nil {
+			log.Printf("Failed to scan transaction: %v", err)
+			return nil, fmt.Errorf("failed to scan transaction: %v", err)
+		}
+		transactions = append(transactions, transaction)
+	}
+	return transactions, nil
 }
-func CreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
-	query := "INSERT INTO monthly_summary (user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id, user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at"
-	var monthlySummary MonthlySummary
-	defaultBudget := []BudgetCategory{
-		{
-			Category:      "general",
-			Amount:        0.0,
-			SubCategories: []map[string]interface{}{},
-		},
+
+func GetTransactionsByCategory(userID int, category string, monthYear int) ([]Transaction, error) {
+
+	year := monthYear % 10000
+	month := monthYear / 10000
+	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+	endDate := startDate.AddDate(0, 1, 0)
+	log.Printf("Getting transactions for user %d, category %s, month %d", userID, category, monthYear)
+	log.Printf("Start date: %s, End date: %s", startDate, endDate)
+	var rows *sql.Rows
+	var err error
+	// if category == "general" {
+	// 	query := "SELECT id, user_id, amount, date, description, category, currency, status, type, provider_type FROM transactions WHERE user_id = $1 AND date BETWEEN $2 AND $3"
+	// 	rows, err = DB.Query(query, userID, startDate, endDate)
+	// 	if err != nil {
+	// 		log.Printf("Failed to query transactions: %v", err)
+	// 		return nil, fmt.Errorf("failed to query transactions: %v", err)
+	// 	}
+	// 	defer rows.Close()
+	// } else {
+	// Create the JSON array string properly
+	categoryJSON := fmt.Sprintf(`["%s"]`, category)
+	query := "SELECT id, user_id, amount, date, description, category, currency, status, type, provider_type FROM transactions WHERE user_id = $1 AND date BETWEEN $2 AND $3 AND category @> $4::jsonb"
+	rows, err = DB.Query(query, userID, startDate, endDate, categoryJSON)
+	if err != nil {
+		log.Printf("Failed to query transactions: %v", err)
+		return nil, fmt.Errorf("failed to query transactions: %v", err)
 	}
-	budgetJSON, _ := json.Marshal(defaultBudget)
-	err := DB.QueryRow(query, userID, monthYear, 0.0, budgetJSON, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.Budget, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.FixedExpenses, &monthlySummary.SavingTargetPercentage, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
+	defer rows.Close()
+	// }
+	var transactions []Transaction
+	for rows.Next() {
+		var transaction Transaction
+		err := rows.Scan(&transaction.TransactionID, &transaction.UserID, &transaction.Amount, &transaction.TransactionDate, &transaction.Description, &transaction.Category, &transaction.Currency, &transaction.Status, &transaction.Type, &transaction.ProviderType)
+		if err != nil {
+			log.Printf("Failed to scan transaction: %v", err)
+			return nil, fmt.Errorf("failed to scan transaction: %v", err)
+		}
+		transactions = append(transactions, transaction)
+	}
+
+	return transactions, nil
+}
+
+//	func GetOrCreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
+//		monthlySummary, _ := GetMonthlySummary(userID, monthYear)
+//		if monthlySummary != nil {
+//			return monthlySummary, nil
+//		}
+//		monthlySummary, err := CreateMonthlySummary(userID, monthYear)
+//		if err != nil {
+//			log.Printf("Failed to create monthly summary: %v", err)
+//			return nil, fmt.Errorf("failed to create monthly summary: %v", err)
+//		}
+//		return monthlySummary, nil
+//	}
+func CreateMonthlySummary(userID int, monthYear int, totalSpent float64, startingBalance float64, income float64, savedAmount float64, invested float64, fixedExpenses float64, savingTargetPercentage float64, budget float64) (*MonthlySummary, error) {
+	query := "INSERT INTO monthly_summary (user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at"
+	var monthlySummary MonthlySummary
+
+	err := DB.QueryRow(query, userID, monthYear, totalSpent, startingBalance, income, savedAmount, invested, fixedExpenses, savingTargetPercentage).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.FixedExpenses, &monthlySummary.SavingTargetPercentage, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
 	if err != nil {
 		log.Printf("Failed to create monthly summary: %v", err)
 		return nil, fmt.Errorf("failed to create monthly summary: %v", err)
+	}
+
+	_, err = CreateMonthlyBudgetSpendCategory(userID, monthlySummary.ID, monthYear, "general", budget)
+	if err != nil {
+		log.Printf("Failed to create monthly budget spend category: %v", err)
+		return nil, fmt.Errorf("failed to create monthly budget spend category: %v", err)
 	}
 	return &monthlySummary, nil
 }
@@ -586,9 +685,9 @@ func HasAnyMonthlySummaries(userID int) (bool, error) {
 }
 
 func GetMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
-	query := "SELECT id, user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at FROM monthly_summary WHERE user_id = $1 AND monthyear = $2"
+	query := "SELECT id, user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at FROM monthly_summary WHERE user_id = $1 AND monthyear = $2"
 	var monthlySummary MonthlySummary
-	err := DB.QueryRow(query, userID, monthYear).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.Budget, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.FixedExpenses, &monthlySummary.SavingTargetPercentage, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
+	err := DB.QueryRow(query, userID, monthYear).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.FixedExpenses, &monthlySummary.SavingTargetPercentage, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
 	if err != nil {
 		log.Printf("Failed to get monthly summary: %v", err)
 		return nil, fmt.Errorf("failed to get monthly summary: %v", err)
@@ -596,14 +695,68 @@ func GetMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
 	return &monthlySummary, nil
 }
 
-func UpdateMonthlySummary(userID int, monthYear int, totalSpent float64, budget json.RawMessage, startingBalance float64, income float64, savedAmount float64, invested float64, fixedExpenses float64, savingTargetPercentage float64) (*MonthlySummary, error) {
-	query := "UPDATE monthly_summary SET total_spent = $1, budget = $2, starting_balance = $3, income = $4, saved_amount = $5, invested = $6, fixed_expenses = $7, saving_target_percentage = $8 WHERE user_id = $9 AND monthyear = $10 RETURNING id, user_id, monthyear, total_spent, budget, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at"
+func UpdateMonthlySummaryTotalSpent(monthlySummary MonthlySummary) (*MonthlySummary, error) {
+	query := "UPDATE monthly_summary SET total_spent = $1 WHERE id = $2 RETURNING id, user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at"
+	var updatedMonthlySummary MonthlySummary
+	err := DB.QueryRow(query, monthlySummary.TotalSpent, monthlySummary.ID).Scan(&updatedMonthlySummary.ID, &updatedMonthlySummary.UserID, &updatedMonthlySummary.MonthYear, &updatedMonthlySummary.TotalSpent, &updatedMonthlySummary.StartingBalance, &updatedMonthlySummary.Income, &updatedMonthlySummary.SavedAmount, &updatedMonthlySummary.Invested, &updatedMonthlySummary.FixedExpenses, &updatedMonthlySummary.SavingTargetPercentage, &updatedMonthlySummary.CreatedAt, &updatedMonthlySummary.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update monthly summary: %v", err)
+	}
+	return &updatedMonthlySummary, nil
+}
+
+func UpdateMonthlySummary(userID int, monthYear int, totalSpent float64, startingBalance float64, income float64, savedAmount float64, invested float64, fixedExpenses float64, savingTargetPercentage float64) (*MonthlySummary, error) {
+	query := "UPDATE monthly_summary SET total_spent = $1, starting_balance = $2, income = $3, saved_amount = $4, invested = $5, fixed_expenses = $6, saving_target_percentage = $7 WHERE user_id = $8 AND monthyear = $9 RETURNING id, user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at"
 	var monthlySummary MonthlySummary
-	err := DB.QueryRow(query, totalSpent, budget, startingBalance, income, savedAmount, invested, fixedExpenses, savingTargetPercentage, userID, monthYear).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.Budget, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.FixedExpenses, &monthlySummary.SavingTargetPercentage, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
+	err := DB.QueryRow(query, totalSpent, startingBalance, income, savedAmount, invested, fixedExpenses, savingTargetPercentage, userID, monthYear).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.FixedExpenses, &monthlySummary.SavingTargetPercentage, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update monthly summary: %v", err)
 	}
 	return &monthlySummary, nil
+}
+
+// ********** MONTHLY BUDGET SPEND CATEGORY **********
+
+func CreateMonthlyBudgetSpendCategory(userID int, monthlySummaryID int, monthYear int, category string, budget float64) (*MonthlyBudgetSpendCategory, error) {
+	query := "INSERT INTO monthly_budget_spend_category (user_id, monthly_summary_id, month_year, category, budget, total_spent) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, user_id, monthly_summary_id, month_year, category, budget, total_spent, created_at, updated_at"
+	var monthlyBudgetSpendCategory MonthlyBudgetSpendCategory
+	err := DB.QueryRow(query, userID, monthlySummaryID, monthYear, category, budget, 0).Scan(&monthlyBudgetSpendCategory.ID, &monthlyBudgetSpendCategory.UserID, &monthlyBudgetSpendCategory.MonthlySummaryID, &monthlyBudgetSpendCategory.MonthYear, &monthlyBudgetSpendCategory.Category, &monthlyBudgetSpendCategory.Budget, &monthlyBudgetSpendCategory.TotalSpent, &monthlyBudgetSpendCategory.CreatedAt, &monthlyBudgetSpendCategory.UpdatedAt)
+	if err != nil {
+		log.Printf("Failed to create monthly budget spend category: %v", err)
+		return nil, fmt.Errorf("failed to create monthly budget spend category: %v", err)
+	}
+	return &monthlyBudgetSpendCategory, nil
+}
+
+func GetMonthlyBudgetSpendCategories(monthlySummaryID int) ([]MonthlyBudgetSpendCategory, error) {
+	query := "SELECT id, user_id, monthly_summary_id, month_year, category, budget, total_spent, daily_allowance, created_at, updated_at FROM monthly_budget_spend_category WHERE monthly_summary_id = $1"
+	var monthlyBudgetSpendCategories []MonthlyBudgetSpendCategory
+	rows, err := DB.Query(query, monthlySummaryID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get monthly budget spend categories: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var monthlyBudgetSpendCategory MonthlyBudgetSpendCategory
+		err := rows.Scan(&monthlyBudgetSpendCategory.ID, &monthlyBudgetSpendCategory.UserID, &monthlyBudgetSpendCategory.MonthlySummaryID, &monthlyBudgetSpendCategory.MonthYear, &monthlyBudgetSpendCategory.Category, &monthlyBudgetSpendCategory.Budget, &monthlyBudgetSpendCategory.TotalSpent, &monthlyBudgetSpendCategory.DailyAllowance, &monthlyBudgetSpendCategory.CreatedAt, &monthlyBudgetSpendCategory.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan monthly budget spend category: %v", err)
+		}
+		monthlyBudgetSpendCategories = append(monthlyBudgetSpendCategories, monthlyBudgetSpendCategory)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating monthly budget spend categories: %v", err)
+	}
+	return monthlyBudgetSpendCategories, nil
+}
+
+func UpdateMonthlyBudgetSpendCategory(monthlyBudgetSpendCategory MonthlyBudgetSpendCategory) error {
+	query := "UPDATE monthly_budget_spend_category SET total_spent = $1, daily_allowance = $2 WHERE id = $3"
+	_, err := DB.Exec(query, monthlyBudgetSpendCategory.TotalSpent, monthlyBudgetSpendCategory.DailyAllowance, monthlyBudgetSpendCategory.ID)
+	if err != nil {
+		return fmt.Errorf("failed to update monthly budget spend category: %v", err)
+	}
+	return nil
 }
 
 // ********** MONTHLY BALANCE **********
@@ -697,28 +850,4 @@ func CreateSavingsGoal(userID int, name string, totalAmount float64, currentSave
 		return nil, fmt.Errorf("failed to create savings goal: %v", err)
 	}
 	return &savingsGoal, nil
-}
-
-// GetBudgetAsStruct converts the raw JSON budget to structured BudgetCategory
-func (ms *MonthlySummary) GetBudgetAsStruct() ([]BudgetCategory, error) {
-	if ms.Budget == nil {
-		return []BudgetCategory{}, nil
-	}
-
-	var budgetCategories []BudgetCategory
-	err := json.Unmarshal(ms.Budget, &budgetCategories)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal budget: %v", err)
-	}
-	return budgetCategories, nil
-}
-
-// SetBudgetFromStruct converts structured BudgetCategory to raw JSON
-func (ms *MonthlySummary) SetBudgetFromStruct(budgetCategories []BudgetCategory) error {
-	budgetJSON, err := json.Marshal(budgetCategories)
-	if err != nil {
-		return fmt.Errorf("failed to marshal budget: %v", err)
-	}
-	ms.Budget = budgetJSON
-	return nil
 }

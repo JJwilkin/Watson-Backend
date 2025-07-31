@@ -186,6 +186,8 @@ func (jp *JobProcessor) ProcessJob(job *Job) error {
 		return jp.processInitialPlaidSync(job)
 	case "fetch_plaid_transactions":
 		return jp.processFetchPlaidTransactions(job)
+	case "process_daily_balance":
+		return jp.processDailyBalnce(job)
 	default:
 		return fmt.Errorf("unknown job type: %s", job.Type)
 	}
@@ -614,6 +616,103 @@ func (jp *JobProcessor) processFetchPlaidTransactions(job *Job) error {
 		return fmt.Errorf("failed to create plaid transactions: %w", err)
 	}
 	log.Printf("✅ Completed Plaid transactions fetch job: %s", job.ID)
+	return nil
+}
+
+func calculateSpendByCategory(category database.MonthlyBudgetSpendCategory) (float64, error) {
+	transactions, err := database.GetTransactionsByCategory(category.UserID, category.Category, category.MonthYear)
+	if err != nil {
+		log.Printf("❌ Failed to get transactions by category: %v", err)
+		return 0, fmt.Errorf("failed to get transactions by category: %w", err)
+	}
+	totalSpent := 0.0
+	for _, transaction := range transactions {
+		totalSpent += transaction.Amount
+	}
+	return totalSpent, nil
+}
+
+func calculateSpendExcludingCategories(category database.MonthlyBudgetSpendCategory, categoriesToExclude []string) (float64, error) {
+	transactions, err := database.GetTransactionsExcludingCategories(category.UserID, categoriesToExclude, category.MonthYear)
+	if err != nil {
+		log.Printf("❌ Failed to get transactions by category: %v", err)
+		return 0, fmt.Errorf("failed to get transactions by category: %w", err)
+	}
+	totalSpent := 0.0
+	for _, transaction := range transactions {
+		totalSpent += transaction.Amount
+	}
+	return totalSpent, nil
+}
+
+func calculateDailyLeftToSpend(spent float64, monthly_budget float64, daysIntoMonth int) float64 {
+	daily_budget := monthly_budget / 30
+	allowance_up_to_now := daily_budget * float64(daysIntoMonth)
+	return allowance_up_to_now - spent
+}
+
+func (jp *JobProcessor) processDailyBalnce(job *Job) error {
+	log.Printf("🔄 Processing daily balance job: %s", job.ID)
+	var jobData map[string]interface{}
+	if err := json.Unmarshal([]byte(job.Data), &jobData); err != nil {
+		return fmt.Errorf("failed to parse job data: %w", err)
+	}
+	log.Printf("🔄 Job data: %v", jobData)
+	userID := int(jobData["user_id"].(float64))
+	monthYear := int(jobData["month_year"].(float64))
+
+	monthlySummary, err := database.GetMonthlySummary(userID, monthYear)
+	if err != nil {
+		return fmt.Errorf("failed to get monthly summary: %w", err)
+	}
+	log.Printf("🔄 Monthly summary: %v", monthlySummary)
+	monthlyBudgetSpendCategories, err := database.GetMonthlyBudgetSpendCategories(monthlySummary.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get monthly budget spend categories: %w", err)
+	}
+	log.Printf("🔄 Monthly budget spend categories: %v", monthlyBudgetSpendCategories)
+	overallTotalSpent := 0.0
+	// Build a list of all categories except "general"
+	categoriesToExclude := []string{}
+	for _, category := range monthlyBudgetSpendCategories {
+		if category.Category != "general" {
+			categoriesToExclude = append(categoriesToExclude, category.Category)
+		}
+	}
+
+	// Calculate spend for each category
+	for _, category := range monthlyBudgetSpendCategories {
+		var totalSpent float64
+		if category.Category == "general" {
+			totalSpent, err = calculateSpendExcludingCategories(category, categoriesToExclude)
+			if err != nil {
+				return fmt.Errorf("failed to calculate spend by category: %w", err)
+			}
+		} else {
+			totalSpent, err = calculateSpendByCategory(category)
+			if err != nil {
+				return fmt.Errorf("failed to calculate spend by category: %w", err)
+			}
+		}
+		daysIntoMonth := time.Now().Day()
+		dailyLeftToSpend := calculateDailyLeftToSpend(totalSpent, category.Budget, daysIntoMonth)
+		log.Printf("🔄 %s daily left to spend: %f", category.Category, dailyLeftToSpend)
+		log.Printf("🔄 %s total spent: %f", category.Category, totalSpent)
+		category.DailyAllowance = dailyLeftToSpend
+		category.TotalSpent = totalSpent
+		database.UpdateMonthlyBudgetSpendCategory(category)
+		overallTotalSpent += totalSpent
+	}
+
+	log.Printf("🔄 Total spent: %f", overallTotalSpent)
+	monthlySummary.TotalSpent = overallTotalSpent
+	monthlySummary.UpdatedAt = time.Now()
+	monthlySummary, err = database.UpdateMonthlySummaryTotalSpent(*monthlySummary)
+	if err != nil {
+		return fmt.Errorf("failed to update monthly summary: %w", err)
+	}
+	log.Printf("🔄 Updated monthly summary: %v", monthlySummary)
+	log.Printf("✅ Finished daily balance job: %s", job.ID)
 	return nil
 }
 
