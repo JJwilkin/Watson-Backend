@@ -728,26 +728,28 @@ func CreateMonthlyBudgetSpendCategory(userID int, monthlySummaryID int, monthYea
 	return &monthlyBudgetSpendCategory, nil
 }
 
-func GetMonthlyBudgetSpendCategories(monthlySummaryID int) ([]MonthlyBudgetSpendCategory, error) {
+func GetMonthlyBudgetSpendCategories(monthlySummaryID int) ([]MonthlyBudgetSpendCategory, float64, error) {
 	query := "SELECT id, user_id, monthly_summary_id, month_year, category, budget, total_spent, daily_allowance, created_at, updated_at FROM monthly_budget_spend_category WHERE monthly_summary_id = $1"
 	var monthlyBudgetSpendCategories []MonthlyBudgetSpendCategory
 	rows, err := DB.Query(query, monthlySummaryID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get monthly budget spend categories: %v", err)
+		return nil, 0, fmt.Errorf("failed to get monthly budget spend categories: %v", err)
 	}
 	defer rows.Close()
+	totalDailyAllowance := 0.0
 	for rows.Next() {
 		var monthlyBudgetSpendCategory MonthlyBudgetSpendCategory
 		err := rows.Scan(&monthlyBudgetSpendCategory.ID, &monthlyBudgetSpendCategory.UserID, &monthlyBudgetSpendCategory.MonthlySummaryID, &monthlyBudgetSpendCategory.MonthYear, &monthlyBudgetSpendCategory.Category, &monthlyBudgetSpendCategory.Budget, &monthlyBudgetSpendCategory.TotalSpent, &monthlyBudgetSpendCategory.DailyAllowance, &monthlyBudgetSpendCategory.CreatedAt, &monthlyBudgetSpendCategory.UpdatedAt)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan monthly budget spend category: %v", err)
+			return nil, 0, fmt.Errorf("failed to scan monthly budget spend category: %v", err)
 		}
 		monthlyBudgetSpendCategories = append(monthlyBudgetSpendCategories, monthlyBudgetSpendCategory)
+		totalDailyAllowance += monthlyBudgetSpendCategory.DailyAllowance
 	}
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating monthly budget spend categories: %v", err)
+		return nil, 0, fmt.Errorf("error iterating monthly budget spend categories: %v", err)
 	}
-	return monthlyBudgetSpendCategories, nil
+	return monthlyBudgetSpendCategories, totalDailyAllowance, nil
 }
 
 func UpdateMonthlyBudgetSpendCategory(monthlyBudgetSpendCategory MonthlyBudgetSpendCategory) error {
