@@ -525,9 +525,18 @@ func createMonthlySummary(c *gin.Context) {
 	}
 
 	income := payload["income"].(float64)
-	startingBalance := payload["starting_balance"].(float64)
-	savedAmount := payload["saved_amount"].(float64)
-	invested := payload["invested"].(float64)
+	startingBalance := 0.0
+	if val, exists := payload["starting_balance"]; exists {
+		startingBalance = val.(float64)
+	}
+	savedAmount := 0.0
+	if val, exists := payload["saved_amount"]; exists {
+		savedAmount = val.(float64)
+	}
+	invested := 0.0
+	if val, exists := payload["invested"]; exists {
+		invested = val.(float64)
+	}
 	fixedExpenses := payload["fixed_expenses"].(float64)
 	savingTargetPercentage := payload["saving_target_percentage"].(float64)
 	budget := payload["budget"].(float64)
