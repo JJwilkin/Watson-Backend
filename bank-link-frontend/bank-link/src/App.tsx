@@ -60,6 +60,7 @@ function App() {
       console.log('Teller connection successful:', data)
       setStatus('success')
       setMessage('Bank account connected successfully! You can close this window now.')
+      window.parent.postMessage({ type: 'BANK_LINKED_SUCCESS' }, '*')
     } else {
       console.error('Failed to connect bank account via Teller')
       setStatus('error')
@@ -86,6 +87,7 @@ function App() {
       console.log('Plaid connection successful:', data)
       setStatus('success')
       setMessage('Bank account connected successfully! You can close this window now.')
+      window.parent.postMessage({ type: 'BANK_LINKED_SUCCESS' }, '*')
     } else {
       console.error('Failed to connect bank account via Plaid')
       setStatus('error')

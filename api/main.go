@@ -463,6 +463,7 @@ func getMonthlySummaryOrEmpty(c *gin.Context) {
 	}
 	monthlyBudgetSpendCategories, totalDailyAllowance, err := database.GetMonthlyBudgetSpendCategories(monthlySummary.ID)
 	if err != nil {
+		log.Printf("Failed to get monthly budget spend categories: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to get monthly budget spend categories",
 		})
