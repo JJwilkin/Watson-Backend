@@ -933,6 +933,59 @@ func getTransactionsByCategory(c *gin.Context) {
 	})
 }
 
+func syncPlaidAccounts(c *gin.Context) {
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+	jobData := map[string]interface{}{
+		"user_id": userIdInt,
+	}
+	enqueueRequest := map[string]interface{}{
+		"type": "sync_plaid_accounts",
+		"data": jobData,
+	}
+
+	enqueueJSON, err := json.Marshal(enqueueRequest)
+	if err != nil {
+		log.Printf("Failed to marshal enqueue request: %v", err)
+	} else {
+		// Make HTTP request to background worker
+		resp, err := http.Post(workerUrl+"/enqueue", "application/json", bytes.NewBuffer(enqueueJSON))
+		if err != nil {
+			log.Printf("Failed to enqueue job: %v", err)
+		} else {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				log.Printf("Successfully enqueued sync plaid accounts job for user %d", userIdInt)
+			} else {
+				log.Printf("Failed to enqueue job, status: %d", resp.StatusCode)
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Successfully enqueued sync plaid accounts job for user " + strconv.Itoa(userIdInt),
+	})
+}
+
+func allAccountsSynced(c *gin.Context) {
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+	allAccountsSynced, err := database.GetAllAccountsSynced(userIdInt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to get all accounts synced",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"all_accounts_synced": allAccountsSynced,
+	})
+}
+
 func validateJWT(c *gin.Context) {
 	userIdInt, err := AuthMiddleware(c)
 	if err != nil {
@@ -1011,6 +1064,8 @@ func main() {
 	// Transactions
 	router.POST("/transactions/process-daily-balance", processDailyBalance)
 	router.GET("/transactions/by-category", getTransactionsByCategory)
+	router.POST("/transactions/sync-plaid-accounts", syncPlaidAccounts)
+	router.GET("/transactions/all-accounts-synced", allAccountsSynced)
 
 	//Saving Goals
 	router.GET("/saving-goals", getSavingGoals)

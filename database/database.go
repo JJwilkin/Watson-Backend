@@ -404,6 +404,15 @@ func CreatePlaidToken(userID int, accessToken string, itemID string) error {
 	return nil
 }
 
+func MarkPlaidAccountAsSynced(accountID string) error {
+	query := "UPDATE plaid_accounts SET is_processed = TRUE WHERE id = $1"
+	_, err := DB.Exec(query, accountID)
+	if err != nil {
+		return fmt.Errorf("failed to mark plaid account as synced: %v", err)
+	}
+	return nil
+}
+
 func GetAccessTokenFromAccountID(accountId string) (string, error) {
 	query := "SELECT p.access_token FROM plaid_accounts as a JOIN plaid_tokens as p ON a.plaid_token_id = p.id WHERE a.id = $1"
 	var accessToken string
@@ -436,6 +445,35 @@ func MarkPlaidTokenAsProcessed(plaidTokenID string) error {
 		return fmt.Errorf("failed to mark plaid token as processed: %v", err)
 	}
 	return nil
+}
+
+func GetAllAccountsSynced(userID int) (bool, error) {
+	query := "SELECT COUNT(*) FROM plaid_accounts WHERE user_id = $1 AND is_processed = FALSE"
+	var count int
+	err := DB.QueryRow(query, userID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("failed to get all accounts synced: %v", err)
+	}
+	return count == 0, nil
+}
+
+func GetPlaidAccountsByUserID(userID int) ([]string, error) {
+	query := "SELECT id FROM plaid_accounts WHERE user_id = $1"
+	rows, err := DB.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get plaid accounts by user id: %v", err)
+	}
+	defer rows.Close()
+	var accounts []string
+	for rows.Next() {
+		var accountID string
+		err := rows.Scan(&accountID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan plaid account: %v", err)
+		}
+		accounts = append(accounts, accountID)
+	}
+	return accounts, nil
 }
 
 func CreatePlaidAccount(userID int, plaidTokenID string, accounts []plaid.AccountBase) error {

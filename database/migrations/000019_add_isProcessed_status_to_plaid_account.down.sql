@@ -1,0 +1,1 @@
+ALTER TABLE plaid_accounts DROP COLUMN is_processed;

@@ -1,0 +1,1 @@
+ALTER TABLE plaid_accounts ADD COLUMN is_processed boolean DEFAULT false;

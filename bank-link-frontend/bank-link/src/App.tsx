@@ -16,6 +16,33 @@ function App() {
     const urlParams = new URLSearchParams(window.location.search)
     const jwtFromUrl = urlParams.get('jwt')
     
+    // Check for OAuth success parameters (for Chase and other OAuth institutions)
+    const publicToken = urlParams.get('public_token')
+    const metadata = urlParams.get('metadata')
+    
+    if (publicToken) {
+      console.log('Detected OAuth success with public_token:', publicToken)
+      // Parse metadata if it exists
+      let parsedMetadata = null
+      if (metadata) {
+        try {
+          parsedMetadata = JSON.parse(decodeURIComponent(metadata))
+        } catch (e) {
+          console.warn('Failed to parse metadata:', e)
+        }
+      }
+      
+      // Handle the OAuth success
+      handlePlaidSuccess(publicToken, parsedMetadata || {})
+      
+      // Clean up URL parameters
+      const newUrl = new URL(window.location.href)
+      newUrl.searchParams.delete('public_token')
+      newUrl.searchParams.delete('metadata')
+      window.history.replaceState({}, '', newUrl.toString())
+      return
+    }
+    
     // Validate JWT in the backend before setting it
     const validateJWT = async () => {
       const url = import.meta.env.VITE_BACKEND_URL || 'http://0.0.0.0:8080';
@@ -108,7 +135,12 @@ function App() {
     setStatus(null)
     setMessage('')
   }
-
+  // return (
+  //   <div>
+  //     <h1> Hello </h1>
+  //     <p>{jwt}</p>
+  //   </div>
+  // )
   // Provider selection screen
   if (jwt && !selectedProvider && status === null) {
     return (

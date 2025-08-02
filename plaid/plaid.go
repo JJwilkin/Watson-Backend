@@ -88,7 +88,13 @@ func CreateLinkToken(userIdInt int) (string, error) {
 	)
 	request.SetProducts([]plaid.Products{plaid.PRODUCTS_TRANSACTIONS})
 	// request.SetWebhook("https://sample-web-hook.com")
-	// request.SetRedirectUri("https://domainname.com/oauth-page.html")
+
+	// Set OAuth redirect URI for institutions that require it (like Chase)
+	redirectUri := os.Getenv("PLAID_REDIRECT_URI")
+	if redirectUri != "" {
+		request.SetRedirectUri(redirectUri)
+		log.Printf("Set OAuth redirect URI: %s", redirectUri)
+	}
 
 	linkTokenCreateResp, _, err := Client.PlaidApi.LinkTokenCreate(context.Background()).LinkTokenCreateRequest(*request).Execute()
 	if err != nil {

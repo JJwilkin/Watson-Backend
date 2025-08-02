@@ -186,6 +186,8 @@ func (jp *JobProcessor) ProcessJob(job *Job) error {
 		return jp.processInitialPlaidSync(job)
 	case "fetch_plaid_transactions":
 		return jp.processFetchPlaidTransactions(job)
+	case "sync_plaid_accounts":
+		return jp.syncPlaidAccounts(job)
 	case "process_daily_balance":
 		return jp.processDailyBalnce(job)
 	default:
@@ -588,6 +590,29 @@ func (jp *JobProcessor) processInitialPlaidSync(job *Job) error {
 	return nil
 }
 
+func (jp *JobProcessor) syncPlaidAccounts(job *Job) error {
+	var jobData map[string]interface{}
+	if err := json.Unmarshal([]byte(job.Data), &jobData); err != nil {
+		return fmt.Errorf("failed to parse job data: %w", err)
+	}
+	// log.Printf("🔄 Job data: %v", jobData)
+	userID := int(jobData["user_id"].(float64))
+	// get plaid account by UserId
+	accounts, err := database.GetPlaidAccountsByUserID(userID)
+	if err != nil {
+		return fmt.Errorf("failed to get plaid accounts by user id: %w", err)
+	}
+	for _, accountID := range accounts {
+		jobData := map[string]interface{}{
+			"account_id": accountID,
+			"user_id":    userID,
+		}
+		jobDataJSON, _ := json.Marshal(jobData)
+		jp.EnqueueJob("fetch_plaid_transactions", jobDataJSON)
+	}
+	return nil
+}
+
 func (jp *JobProcessor) processFetchPlaidTransactions(job *Job) error {
 	log.Printf("🔄 Processing Plaid transactions fetch job: %s", job.ID)
 	var jobData map[string]interface{}
@@ -597,13 +622,22 @@ func (jp *JobProcessor) processFetchPlaidTransactions(job *Job) error {
 	log.Printf("🔄 Job data: %v", jobData)
 	accountID := jobData["account_id"].(string)
 	userID := int(jobData["user_id"].(float64))
+	monthYear, ok := jobData["month_year"].(int)
+	if !ok {
+		// Use current month if not provided
+		now := time.Now()
+		monthYear = int(now.Month())*10000 + now.Year()
+	}
 	accessToken, err := database.GetAccessTokenFromAccountID(accountID)
 	if err != nil {
 		return fmt.Errorf("failed to get access token from account id: %w", err)
 	}
-	// FAKE START AND END DATE FOR NOW
-	startDate := time.Now().Add(-365 * 24 * time.Hour).Format(time.RFC3339)
-	endDate := time.Now().Format(time.RFC3339)
+	// Set startDate to the first day of the month, endDate to the last day of the month
+	month := int(monthYear / 10000)
+	year := int(monthYear % 10000)
+	location := time.Now().Location()
+	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, location).Format(time.RFC3339)
+	endDate := time.Date(year, time.Month(month+1), 0, 23, 59, 59, 0, location).Format(time.RFC3339)
 	log.Printf("🔄 Fetching transactions from %s to %s", startDate, endDate)
 	transactions, err := plaid.GetTransactions(accessToken, startDate, endDate)
 	if err != nil {
@@ -614,6 +648,12 @@ func (jp *JobProcessor) processFetchPlaidTransactions(job *Job) error {
 	err = database.CreatePlaidTransactions(userID, accountID, transactions)
 	if err != nil {
 		return fmt.Errorf("failed to create plaid transactions: %w", err)
+	}
+
+	// Mark plaid Account as synced
+	err = database.MarkPlaidAccountAsSynced(accountID)
+	if err != nil {
+		return fmt.Errorf("failed to mark plaid account as synced: %w", err)
 	}
 	log.Printf("✅ Completed Plaid transactions fetch job: %s", job.ID)
 	return nil
@@ -666,7 +706,7 @@ func (jp *JobProcessor) processDailyBalnce(job *Job) error {
 		return fmt.Errorf("failed to get monthly summary: %w", err)
 	}
 	log.Printf("🔄 Monthly summary: %v", monthlySummary)
-	monthlyBudgetSpendCategories, err := database.GetMonthlyBudgetSpendCategories(monthlySummary.ID)
+	monthlyBudgetSpendCategories, _, err := database.GetMonthlyBudgetSpendCategories(monthlySummary.ID)
 	if err != nil {
 		return fmt.Errorf("failed to get monthly budget spend categories: %w", err)
 	}

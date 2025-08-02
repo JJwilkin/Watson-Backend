@@ -35,6 +35,7 @@ export default function PlaidLink({ onSuccess, onExit, jwt }: PlaidLinkProps) {
         }
 
         const data = await response.json();
+        console.log('Link token data:', data);
         setLinkToken(data.link_token);
       } catch (err) {
         console.error('Error fetching link token:', err);
