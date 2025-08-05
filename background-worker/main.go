@@ -568,14 +568,17 @@ func (jp *JobProcessor) processInitialPlaidSync(job *Job) error {
 	if err != nil {
 		return fmt.Errorf("failed to get user id from access token: %w", err)
 	}
-	err = database.CreatePlaidAccount(userID, plaidTokenID, accounts)
-	if err != nil {
-		return fmt.Errorf("failed to create plaid account: %w", err)
-	}
+
 	err = database.MarkPlaidTokenAsProcessed(plaidTokenID)
 	if err != nil {
 		return fmt.Errorf("failed to mark plaid token as processed: %w", err)
 	}
+
+	err = database.CreatePlaidAccount(userID, plaidTokenID, accounts)
+	if err != nil {
+		return fmt.Errorf("failed to create plaid account: %w", err)
+	}
+
 	log.Printf("✅ Completed initial Plaid sync job: %s", job.ID)
 
 	// enqueue job to fetch transactions for each plaid account

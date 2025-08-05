@@ -905,6 +905,109 @@ func processDailyBalance(c *gin.Context) {
 	})
 }
 
+func processDailyBalanceSync(c *gin.Context) {
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+	var payload map[string]interface{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request body",
+		})
+		return
+	}
+	monthYear := GetCurrentMonthYear()
+	if monthYearFromPayload, exists := payload["month_year"]; exists {
+		monthYear = int(monthYearFromPayload.(float64))
+	}
+
+	allAccountsSynced, err := database.GetAllAccountsSynced(userIdInt)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to get all accounts synced",
+		})
+		return
+	}
+
+	// If not synced, poll every 2 seconds up to 5 times
+	if !allAccountsSynced {
+		maxAttempts := 5
+		attempt := 0
+
+		for attempt < maxAttempts {
+			time.Sleep(2 * time.Second) // Wait 2 seconds
+			attempt++
+
+			allAccountsSynced, err = database.GetAllAccountsSynced(userIdInt)
+			if err != nil {
+				log.Printf("Error checking accounts synced on attempt %d: %v", attempt, err)
+				continue
+			}
+
+			if allAccountsSynced {
+				log.Printf("All accounts synced after %d attempts", attempt)
+				break
+			}
+
+			log.Printf("Attempt %d: Accounts not yet synced, waiting...", attempt)
+		}
+
+		// If still not synced after all attempts, log it but continue
+		if !allAccountsSynced {
+			log.Printf("Warning: Accounts not synced after %d attempts", maxAttempts)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Accounts not synced after " + strconv.Itoa(maxAttempts) + " attempts",
+			})
+			return
+		}
+	}
+
+	jobData := map[string]interface{}{
+		"user_id":    userIdInt,
+		"month_year": monthYear,
+	}
+
+	enqueueRequest := map[string]interface{}{
+		"type": "process_daily_balance",
+		"data": jobData,
+	}
+
+	enqueueJSON, err := json.Marshal(enqueueRequest)
+	if err != nil {
+		log.Printf("Failed to marshal enqueue request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to marshal enqueue request",
+		})
+		return
+	}
+
+	// Make HTTP request to background worker
+	resp, err := http.Post(workerUrl+"/enqueue", "application/json", bytes.NewBuffer(enqueueJSON))
+	// resp, err := http.Post("http://worker:8081/enqueue", "application/json", bytes.NewBuffer(enqueueJSON))
+	if err != nil {
+		log.Printf("Failed to enqueue job: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to enqueue job",
+		})
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK {
+		log.Printf("Successfully enqueued transaction processing job for user %d", userIdInt)
+	} else {
+		log.Printf("Failed to enqueue job, status: %d", resp.StatusCode)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to enqueue job",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Successfully enqueued transaction processing job for user " + strconv.Itoa(userIdInt),
+	})
+
+}
+
 func getTransactionsByCategory(c *gin.Context) {
 	userIdInt, err := AuthMiddleware(c)
 	if err != nil {
@@ -980,6 +1083,35 @@ func allAccountsSynced(c *gin.Context) {
 			"error": "Failed to get all accounts synced",
 		})
 		return
+	}
+
+	// If not synced, poll every 2 seconds up to 5 times
+	if !allAccountsSynced {
+		maxAttempts := 5
+		attempt := 0
+
+		for attempt < maxAttempts {
+			time.Sleep(2 * time.Second) // Wait 2 seconds
+			attempt++
+
+			allAccountsSynced, err = database.GetAllAccountsSynced(userIdInt)
+			if err != nil {
+				log.Printf("Error checking accounts synced on attempt %d: %v", attempt, err)
+				continue
+			}
+
+			if allAccountsSynced {
+				log.Printf("All accounts synced after %d attempts", attempt)
+				break
+			}
+
+			log.Printf("Attempt %d: Accounts not yet synced, waiting...", attempt)
+		}
+
+		// If still not synced after all attempts, log it but continue
+		if !allAccountsSynced {
+			log.Printf("Warning: Accounts not synced after %d attempts", maxAttempts)
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"all_accounts_synced": allAccountsSynced,
@@ -1063,6 +1195,7 @@ func main() {
 
 	// Transactions
 	router.POST("/transactions/process-daily-balance", processDailyBalance)
+	router.POST("/transactions/process-daily-balance/sync", processDailyBalanceSync)
 	router.GET("/transactions/by-category", getTransactionsByCategory)
 	router.POST("/transactions/sync-plaid-accounts", syncPlaidAccounts)
 	router.GET("/transactions/all-accounts-synced", allAccountsSynced)
