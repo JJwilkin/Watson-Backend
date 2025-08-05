@@ -410,6 +410,7 @@ func MarkPlaidAccountAsSynced(accountID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to mark plaid account as synced: %v", err)
 	}
+	log.Printf("Marked plaid account as synced: %s", accountID)
 	return nil
 }
 

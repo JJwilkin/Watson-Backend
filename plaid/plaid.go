@@ -113,7 +113,6 @@ func ExchangePublicToken(publicToken string, userIdInt int) (string, string, err
 	).Execute()
 	accessToken := exchangePublicTokenResp.GetAccessToken()
 	itemId := exchangePublicTokenResp.GetItemId()
-	log.Printf("Plaid success payload: %v, %v", itemId, accessToken)
 	err = database.CreatePlaidToken(userIdInt, accessToken, itemId)
 	if err != nil {
 		log.Printf("Failed to create plaid token: %v", err)
