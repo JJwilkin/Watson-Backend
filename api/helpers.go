@@ -45,6 +45,7 @@ func VerifyJWT(tokenString string) (int, error) {
 
 // returns month and year formatted as MMYYYY
 func GetCurrentMonthYear() int {
-	now := time.Now()
-	return int(now.Month())*10000 + now.Year()
+	// now := time.Now()
+	// return int(now.Month())*10000 + now.Year()
+	return 72025
 }

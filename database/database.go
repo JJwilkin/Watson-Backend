@@ -756,6 +756,16 @@ func UpdateMonthlySummary(userID int, monthYear int, totalSpent float64, startin
 
 // ********** MONTHLY BUDGET SPEND CATEGORY **********
 
+func GetMonthlyBudgetSpendCategory(userID int, monthlySummaryID int, monthYear int, category string) (*MonthlyBudgetSpendCategory, error) {
+	query := "SELECT id, user_id, monthly_summary_id, month_year, category, budget, total_spent, daily_allowance, created_at, updated_at FROM monthly_budget_spend_category WHERE user_id = $1 AND monthly_summary_id = $2 AND month_year = $3 AND category = $4"
+	var monthlyBudgetSpendCategory MonthlyBudgetSpendCategory
+	err := DB.QueryRow(query, userID, monthlySummaryID, monthYear, category).Scan(&monthlyBudgetSpendCategory.ID, &monthlyBudgetSpendCategory.UserID, &monthlyBudgetSpendCategory.MonthlySummaryID, &monthlyBudgetSpendCategory.MonthYear, &monthlyBudgetSpendCategory.Category, &monthlyBudgetSpendCategory.Budget, &monthlyBudgetSpendCategory.TotalSpent, &monthlyBudgetSpendCategory.DailyAllowance, &monthlyBudgetSpendCategory.CreatedAt, &monthlyBudgetSpendCategory.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get monthly budget spend category: %v", err)
+	}
+	return &monthlyBudgetSpendCategory, nil
+}
+
 func CreateMonthlyBudgetSpendCategory(userID int, monthlySummaryID int, monthYear int, category string, budget float64) (*MonthlyBudgetSpendCategory, error) {
 	query := "INSERT INTO monthly_budget_spend_category (user_id, monthly_summary_id, month_year, category, budget, total_spent) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, user_id, monthly_summary_id, month_year, category, budget, total_spent, created_at, updated_at"
 	var monthlyBudgetSpendCategory MonthlyBudgetSpendCategory

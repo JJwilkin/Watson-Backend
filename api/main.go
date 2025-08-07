@@ -781,6 +781,15 @@ func createMonthlyBudgetSpendCategory(c *gin.Context) {
 	category := payload["category"].(string)
 	budget := payload["budget"].(float64)
 
+	// Check if a monthly budget spend category for this user, category, and monthYear already exists
+	existingCategory, err := database.GetMonthlyBudgetSpendCategory(userIdInt, monthlySummary.ID, monthYear, category)
+	if existingCategory != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Monthly budget spend category for this category already exists for this month",
+		})
+		return
+	}
+
 	monthlyBudgetSpendCategory, err := database.CreateMonthlyBudgetSpendCategory(userIdInt, monthlySummary.ID, monthYear, category, budget)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -1013,17 +1022,22 @@ func getTransactionsByCategory(c *gin.Context) {
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
-	category := c.Query("category")
+	var payload map[string]interface{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request body",
+		})
+		return
+	}
+	category := payload["category"].(string)
 	if category == "" {
 		category = "general"
 	}
-	monthYearStr := c.Query("monthyear")
 	monthYear := GetCurrentMonthYear()
-	if monthYearStr != "" {
-		if parsed, err := strconv.Atoi(monthYearStr); err == nil {
-			monthYear = parsed
-		}
+	if monthYearFromPayload, exists := payload["month_year"]; exists {
+		monthYear = int(monthYearFromPayload.(float64))
 	}
+
 	transactions, err := database.GetTransactionsByCategory(userIdInt, category, monthYear)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -1196,7 +1210,7 @@ func main() {
 	// Transactions
 	router.POST("/transactions/process-daily-balance", processDailyBalance)
 	router.POST("/transactions/process-daily-balance/sync", processDailyBalanceSync)
-	router.GET("/transactions/by-category", getTransactionsByCategory)
+	router.POST("/transactions/by-category", getTransactionsByCategory)
 	router.POST("/transactions/sync-plaid-accounts", syncPlaidAccounts)
 	router.GET("/transactions/all-accounts-synced", allAccountsSynced)
 

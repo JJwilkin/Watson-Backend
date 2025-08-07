@@ -926,7 +926,7 @@ func main() {
 	processor.EnqueueSampleJobs()
 
 	// Start 3 background workers
-	processor.StartWorkers(3)
+	processor.StartWorkers(10)
 
 	// Start the HTTP server
 	processor.StartHTTPServer(workerPort)
