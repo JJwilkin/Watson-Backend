@@ -1052,9 +1052,17 @@ func getTransactionsByCategory(c *gin.Context) {
 				"error": "Failed to get transactions by category",
 			})
 		}
+	} else if category == "all" {
+		transactions, err = database.GetAllTransactions(userIdInt, monthYear)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to get all transactions",
+			})
+		}
 	} else {
 		transactions, err = database.GetTransactionsByCategory(userIdInt, category, monthYear)
 	}
+
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to get transactions by category",

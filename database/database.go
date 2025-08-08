@@ -682,6 +682,31 @@ func GetTransactionsByCategory(userID int, category string, monthYear int) ([]Tr
 	return transactions, nil
 }
 
+func GetAllTransactions(userID int, monthYear int) ([]Transaction, error) {
+	year := monthYear % 10000
+	month := monthYear / 10000
+	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+	endDate := startDate.AddDate(0, 1, 0)
+	log.Printf("Getting all transactions for user %d, month %d", userID, monthYear)
+	log.Printf("Start date: %s, End date: %s", startDate, endDate)
+	query := "SELECT id, user_id, amount, date, description, category, currency, status, type, provider_type FROM transactions WHERE user_id = $1 AND date BETWEEN $2 AND $3"
+	rows, err := DB.Query(query, userID, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all transactions: %v", err)
+	}
+	defer rows.Close()
+	var transactions []Transaction
+	for rows.Next() {
+		var transaction Transaction
+		err := rows.Scan(&transaction.TransactionID, &transaction.UserID, &transaction.Amount, &transaction.TransactionDate, &transaction.Description, &transaction.Category, &transaction.Currency, &transaction.Status, &transaction.Type, &transaction.ProviderType)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan transaction: %v", err)
+		}
+		transactions = append(transactions, transaction)
+	}
+	return transactions, nil
+}
+
 // func GetOrCreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
 // 	monthlySummary, _ := GetMonthlySummary(userID, monthYear)
 // 	if monthlySummary != nil {
