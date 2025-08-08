@@ -696,6 +696,11 @@ func GetTransactionsByCategory(userID int, category string, monthYear int) ([]Tr
 // }
 
 func UpsertMonthlySummary(userID int, monthYear int, totalSpent float64, startingBalance float64, income float64, savedAmount float64, invested float64, fixedExpenses float64, savingTargetPercentage float64, budget float64) (*MonthlySummary, error) {
+	existingMonthlySummary, _ := GetMonthlySummary(userID, monthYear)
+	if existingMonthlySummary == nil {
+		return CreateMonthlySummary(userID, monthYear, totalSpent, startingBalance, income, savedAmount, invested, fixedExpenses, savingTargetPercentage, budget)
+	}
+
 	query := "INSERT INTO monthly_summary (user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (user_id, monthyear) DO UPDATE SET total_spent = $3, starting_balance = $4, income = $5, saved_amount = $6, invested = $7, fixed_expenses = $8, saving_target_percentage = $9 RETURNING id, user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at"
 	var monthlySummary MonthlySummary
 
