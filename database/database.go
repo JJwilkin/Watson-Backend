@@ -682,18 +682,31 @@ func GetTransactionsByCategory(userID int, category string, monthYear int) ([]Tr
 	return transactions, nil
 }
 
-//	func GetOrCreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
-//		monthlySummary, _ := GetMonthlySummary(userID, monthYear)
-//		if monthlySummary != nil {
-//			return monthlySummary, nil
-//		}
-//		monthlySummary, err := CreateMonthlySummary(userID, monthYear)
-//		if err != nil {
-//			log.Printf("Failed to create monthly summary: %v", err)
-//			return nil, fmt.Errorf("failed to create monthly summary: %v", err)
-//		}
-//		return monthlySummary, nil
-//	}
+// func GetOrCreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
+// 	monthlySummary, _ := GetMonthlySummary(userID, monthYear)
+// 	if monthlySummary != nil {
+// 		return monthlySummary, nil
+// 	}
+// 	monthlySummary, err := CreateMonthlySummary(userID, monthYear)
+// 	if err != nil {
+// 		log.Printf("Failed to create monthly summary: %v", err)
+// 		return nil, fmt.Errorf("failed to create monthly summary: %v", err)
+// 	}
+// 	return monthlySummary, nil
+// }
+
+func UpsertMonthlySummary(userID int, monthYear int, totalSpent float64, startingBalance float64, income float64, savedAmount float64, invested float64, fixedExpenses float64, savingTargetPercentage float64, budget float64) (*MonthlySummary, error) {
+	query := "INSERT INTO monthly_summary (user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (user_id, monthyear) DO UPDATE SET total_spent = $3, starting_balance = $4, income = $5, saved_amount = $6, invested = $7, fixed_expenses = $8, saving_target_percentage = $9 RETURNING id, user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at"
+	var monthlySummary MonthlySummary
+
+	err := DB.QueryRow(query, userID, monthYear, totalSpent, startingBalance, income, savedAmount, invested, fixedExpenses, savingTargetPercentage).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.FixedExpenses, &monthlySummary.SavingTargetPercentage, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
+	if err != nil {
+		log.Printf("Failed to upsert monthly summary: %v", err)
+		return nil, fmt.Errorf("failed to upsert monthly summary: %v", err)
+	}
+	return &monthlySummary, nil
+}
+
 func CreateMonthlySummary(userID int, monthYear int, totalSpent float64, startingBalance float64, income float64, savedAmount float64, invested float64, fixedExpenses float64, savingTargetPercentage float64, budget float64) (*MonthlySummary, error) {
 	query := "INSERT INTO monthly_summary (user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at"
 	var monthlySummary MonthlySummary

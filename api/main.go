@@ -507,7 +507,7 @@ func getMonthlySummaryOrEmpty(c *gin.Context) {
 //		"saving_target_percentage": 10,
 //		"budget": 1000
 //	}
-func createMonthlySummary(c *gin.Context) {
+func upsertMonthlySummary(c *gin.Context) {
 	userIdInt, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
@@ -543,10 +543,10 @@ func createMonthlySummary(c *gin.Context) {
 	savingTargetPercentage := payload["saving_target_percentage"].(float64)
 	budget := payload["budget"].(float64)
 
-	monthlySummary, err := database.CreateMonthlySummary(userIdInt, monthYear, 0.0, startingBalance, income, savedAmount, invested, fixedExpenses, savingTargetPercentage, budget)
+	monthlySummary, err := database.UpsertMonthlySummary(userIdInt, monthYear, 0.0, startingBalance, income, savedAmount, invested, fixedExpenses, savingTargetPercentage, budget)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to create monthly summary",
+			"error": "Failed to upsert monthly summary",
 		})
 		return
 	}
@@ -1213,7 +1213,7 @@ func main() {
 	// Monthly Summary
 	router.GET("/monthly-summary", getMonthlySummaryOrEmpty)
 	router.GET("/monthly-summary/has-any", hasAnyMonthlySummaries)
-	router.POST("/monthly-summary", createMonthlySummary)
+	router.POST("/monthly-summary", upsertMonthlySummary)
 	router.PUT("/monthly-summary", updateMonthlySummary)
 	// Monthly Balance
 	router.GET("/monthly-balance", getMonthlyBalanceOrEmpty)
