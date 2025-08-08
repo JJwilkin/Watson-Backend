@@ -1038,7 +1038,23 @@ func getTransactionsByCategory(c *gin.Context) {
 		monthYear = int(monthYearFromPayload.(float64))
 	}
 
-	transactions, err := database.GetTransactionsByCategory(userIdInt, category, monthYear)
+	var transactions []database.Transaction
+	if category == "general" {
+		categoriesToExclude, err := database.GetCategoriesToExclude(userIdInt, monthYear)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to get categories to exclude",
+			})
+		}
+		transactions, err = database.GetTransactionsExcludingCategories(userIdInt, categoriesToExclude, monthYear)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to get transactions by category",
+			})
+		}
+	} else {
+		transactions, err = database.GetTransactionsByCategory(userIdInt, category, monthYear)
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to get transactions by category",

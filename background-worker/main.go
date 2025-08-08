@@ -713,17 +713,33 @@ func (jp *JobProcessor) processDailyBalnce(job *Job) error {
 	if err != nil {
 		return fmt.Errorf("failed to get monthly budget spend categories: %w", err)
 	}
-	log.Printf("🔄 Monthly budget spend categories: %v", monthlyBudgetSpendCategories)
+	// log.Printf("🔄 Monthly budget spend categories: %v", monthlyBudgetSpendCategories)
 	overallTotalSpent := 0.0
-	// Build a list of all categories except "general"
-	categoriesToExclude := []string{}
-	for _, category := range monthlyBudgetSpendCategories {
-		if category.Category != "general" {
-			categoriesToExclude = append(categoriesToExclude, category.Category)
-		}
+	// // Build a list of all categories except "general"
+	// categoriesToExclude := []string{}
+	// for _, category := range monthlyBudgetSpendCategories {
+	// 	if category.Category != "general" {
+	// 		categoriesToExclude = append(categoriesToExclude, category.Category)
+	// 	}
+	// }
+
+	categoriesToExclude, err := database.GetCategoriesToExclude(userID, monthYear)
+	if err != nil {
+		return fmt.Errorf("failed to get categories to exclude: %w", err)
 	}
 
-	// Calculate spend for each category
+	// Calculate spend for each category and store initial daily allowances
+	type CategoryWithAllowance struct {
+		Category       database.MonthlyBudgetSpendCategory
+		DailyAllowance float64
+		IsNegative     bool
+	}
+
+	var categoriesWithAllowances []CategoryWithAllowance
+	var totalNegativeAllowance float64
+	var totalPositiveAllowance float64
+
+	// First pass: calculate initial daily allowances
 	for _, category := range monthlyBudgetSpendCategories {
 		var totalSpent float64
 		if category.Category == "general" {
@@ -737,14 +753,63 @@ func (jp *JobProcessor) processDailyBalnce(job *Job) error {
 				return fmt.Errorf("failed to calculate spend by category: %w", err)
 			}
 		}
+
 		daysIntoMonth := time.Now().Day()
 		dailyLeftToSpend := calculateDailyLeftToSpend(totalSpent, category.Budget, daysIntoMonth)
-		log.Printf("🔄 %s daily left to spend: %f", category.Category, dailyLeftToSpend)
+		log.Printf("🔄 %s initial daily left to spend: %f", category.Category, dailyLeftToSpend)
 		log.Printf("🔄 %s total spent: %f", category.Category, totalSpent)
-		category.DailyAllowance = dailyLeftToSpend
+
 		category.TotalSpent = totalSpent
-		database.UpdateMonthlyBudgetSpendCategory(category)
 		overallTotalSpent += totalSpent
+
+		isNegative := dailyLeftToSpend < 0
+		if isNegative {
+			totalNegativeAllowance += dailyLeftToSpend
+		} else {
+			totalPositiveAllowance += dailyLeftToSpend
+		}
+
+		categoriesWithAllowances = append(categoriesWithAllowances, CategoryWithAllowance{
+			Category:       category,
+			DailyAllowance: dailyLeftToSpend,
+			IsNegative:     isNegative,
+		})
+	}
+
+	log.Printf("🔄 Total negative allowance: %f", totalNegativeAllowance)
+	log.Printf("🔄 Total positive allowance: %f", totalPositiveAllowance)
+
+	// Second pass: redistribute allowances
+	if totalNegativeAllowance < 0 && totalPositiveAllowance > 0 {
+		// Calculate how much we can borrow from positive categories
+		borrowableAmount := totalPositiveAllowance
+		neededAmount := -totalNegativeAllowance
+
+		// If we have enough positive allowance to cover all negative, redistribute
+		if borrowableAmount >= neededAmount {
+			// Calculate redistribution ratio
+			redistributionRatio := neededAmount / borrowableAmount
+
+			for i := range categoriesWithAllowances {
+				if categoriesWithAllowances[i].IsNegative {
+					// Set negative categories to 0
+					categoriesWithAllowances[i].DailyAllowance = 0
+				} else {
+					// Reduce positive categories proportionally
+					categoriesWithAllowances[i].DailyAllowance = categoriesWithAllowances[i].DailyAllowance * (1 - redistributionRatio)
+				}
+			}
+		} else {
+			// Not enough positive allowance to cover all negative; keep original values (no redistribution)
+			// This preserves negative daily allowances to reflect true deficit
+		}
+	}
+
+	// Update database with final allowances
+	for _, catWithAllowance := range categoriesWithAllowances {
+		catWithAllowance.Category.DailyAllowance = catWithAllowance.DailyAllowance
+		database.UpdateMonthlyBudgetSpendCategory(catWithAllowance.Category)
+		log.Printf("🔄 %s final daily left to spend: %f", catWithAllowance.Category.Category, catWithAllowance.DailyAllowance)
 	}
 
 	log.Printf("🔄 Total spent: %f", overallTotalSpent)

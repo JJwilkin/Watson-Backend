@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/lib/pq"
-	_ "github.com/lib/pq"
 	plaid "github.com/plaid/plaid-go/v31/plaid"
 )
 
@@ -775,6 +774,26 @@ func CreateMonthlyBudgetSpendCategory(userID int, monthlySummaryID int, monthYea
 		return nil, fmt.Errorf("failed to create monthly budget spend category: %v", err)
 	}
 	return &monthlyBudgetSpendCategory, nil
+}
+
+func GetCategoriesToExclude(userID int, monthYear int) ([]string, error) {
+	monthlySummary, err := GetMonthlySummary(userID, monthYear)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get monthly summary: %w", err)
+	}
+	monthlyBudgetSpendCategories, _, err := GetMonthlyBudgetSpendCategories(monthlySummary.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get monthly budget spend categories: %w", err)
+	}
+	log.Printf("🔄 Monthly budget spend categories: %v", monthlyBudgetSpendCategories)
+	// Build a list of all categories except "general"
+	categoriesToExclude := []string{}
+	for _, category := range monthlyBudgetSpendCategories {
+		if category.Category != "general" {
+			categoriesToExclude = append(categoriesToExclude, category.Category)
+		}
+	}
+	return categoriesToExclude, nil
 }
 
 func GetMonthlyBudgetSpendCategories(monthlySummaryID int) ([]MonthlyBudgetSpendCategory, float64, error) {
