@@ -1059,6 +1059,13 @@ func getTransactionsByCategory(c *gin.Context) {
 				"error": "Failed to get all transactions",
 			})
 		}
+		// Update the monthly summary to store the 5 latest transactions
+		err = database.UpdateMonthlySummaryWithLatestTransactions(userIdInt, monthYear, transactions[:5])
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "Failed to update monthly summary with latest transactions",
+			})
+		}
 	} else {
 		transactions, err = database.GetTransactionsByCategory(userIdInt, category, monthYear)
 	}

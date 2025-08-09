@@ -1,0 +1,1 @@
+ALTER TABLE monthly_summary DROP COLUMN latest_transactions;

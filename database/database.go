@@ -62,18 +62,19 @@ type TellerPayload struct {
 }
 
 type MonthlySummary struct {
-	ID                     int       `json:"id"`
-	UserID                 int       `json:"user_id"`
-	MonthYear              int       `json:"monthyear"`
-	TotalSpent             float64   `json:"total_spent"`
-	FixedExpenses          float64   `json:"fixed_expenses"`
-	SavingTargetPercentage float64   `json:"saving_target_percentage"`
-	StartingBalance        float64   `json:"starting_balance"`
-	Income                 float64   `json:"income"`
-	SavedAmount            float64   `json:"saved_amount"`
-	Invested               float64   `json:"invested"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	ID                     int           `json:"id"`
+	UserID                 int           `json:"user_id"`
+	MonthYear              int           `json:"monthyear"`
+	TotalSpent             float64       `json:"total_spent"`
+	FixedExpenses          float64       `json:"fixed_expenses"`
+	SavingTargetPercentage float64       `json:"saving_target_percentage"`
+	StartingBalance        float64       `json:"starting_balance"`
+	Income                 float64       `json:"income"`
+	SavedAmount            float64       `json:"saved_amount"`
+	Invested               float64       `json:"invested"`
+	LatestTransactions     []Transaction `json:"latest_transactions"`
+	CreatedAt              time.Time     `json:"created_at"`
+	UpdatedAt              time.Time     `json:"updated_at"`
 }
 
 type MonthlyBudgetSpendCategory struct {
@@ -689,7 +690,7 @@ func GetAllTransactions(userID int, monthYear int) ([]Transaction, error) {
 	endDate := startDate.AddDate(0, 1, 0)
 	log.Printf("Getting all transactions for user %d, month %d", userID, monthYear)
 	log.Printf("Start date: %s, End date: %s", startDate, endDate)
-	query := "SELECT id, user_id, amount, date, description, category, currency, status, type, provider_type FROM transactions WHERE user_id = $1 AND date BETWEEN $2 AND $3"
+	query := "SELECT id, user_id, amount, date, description, category, currency, status, type, provider_type FROM transactions WHERE user_id = $1 AND date BETWEEN $2 AND $3 ORDER BY date DESC"
 	rows, err := DB.Query(query, userID, startDate, endDate)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get all transactions: %v", err)
@@ -705,6 +706,20 @@ func GetAllTransactions(userID int, monthYear int) ([]Transaction, error) {
 		transactions = append(transactions, transaction)
 	}
 	return transactions, nil
+}
+
+// TODO: Add index for userID and monthYear
+func UpdateMonthlySummaryWithLatestTransactions(userID int, monthYear int, transactions []Transaction) error {
+	query := "UPDATE monthly_summary SET latest_transactions = $1 WHERE user_id = $2 AND monthyear = $3"
+	jsonBytes, err := json.Marshal(transactions)
+	if err != nil {
+		return fmt.Errorf("failed to marshal latest transactions: %v", err)
+	}
+	_, err = DB.Exec(query, jsonBytes, userID, monthYear)
+	if err != nil {
+		return fmt.Errorf("failed to update monthly summary with latest transactions: %v", err)
+	}
+	return nil
 }
 
 // func GetOrCreateMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
@@ -766,12 +781,22 @@ func HasAnyMonthlySummaries(userID int) (bool, error) {
 }
 
 func GetMonthlySummary(userID int, monthYear int) (*MonthlySummary, error) {
-	query := "SELECT id, user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, created_at, updated_at FROM monthly_summary WHERE user_id = $1 AND monthyear = $2"
+	query := "SELECT id, user_id, monthyear, total_spent, starting_balance, income, saved_amount, invested, fixed_expenses, saving_target_percentage, latest_transactions, created_at, updated_at FROM monthly_summary WHERE user_id = $1 AND monthyear = $2"
 	var monthlySummary MonthlySummary
-	err := DB.QueryRow(query, userID, monthYear).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.FixedExpenses, &monthlySummary.SavingTargetPercentage, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
+	var latestTransactionsRaw []byte
+	err := DB.QueryRow(query, userID, monthYear).Scan(&monthlySummary.ID, &monthlySummary.UserID, &monthlySummary.MonthYear, &monthlySummary.TotalSpent, &monthlySummary.StartingBalance, &monthlySummary.Income, &monthlySummary.SavedAmount, &monthlySummary.Invested, &monthlySummary.FixedExpenses, &monthlySummary.SavingTargetPercentage, &latestTransactionsRaw, &monthlySummary.CreatedAt, &monthlySummary.UpdatedAt)
 	if err != nil {
 		log.Printf("Failed to get monthly summary: %v", err)
 		return nil, fmt.Errorf("failed to get monthly summary: %v", err)
+	}
+	if len(latestTransactionsRaw) > 0 {
+		if unmarshalErr := json.Unmarshal(latestTransactionsRaw, &monthlySummary.LatestTransactions); unmarshalErr != nil {
+			log.Printf("Failed to unmarshal latest_transactions: %v", unmarshalErr)
+			// Do not fail the whole call; leave LatestTransactions empty
+			monthlySummary.LatestTransactions = []Transaction{}
+		}
+	} else {
+		monthlySummary.LatestTransactions = []Transaction{}
 	}
 	return &monthlySummary, nil
 }

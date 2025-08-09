@@ -1,0 +1,1 @@
+ALTER TABLE monthly_summary ADD COLUMN latest_transactions jsonb DEFAULT '[]'::jsonb;
