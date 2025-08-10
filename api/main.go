@@ -824,6 +824,9 @@ func updateMonthlyBudgetSpendCategory(c *gin.Context) {
 		return
 	}
 	monthlyBudgetSpendCategory.Budget = newBudget
+	daysIntoMonth := time.Now().Day()
+	dailyLeftToSpend := database.CalculateDailyLeftToSpend(monthlyBudgetSpendCategory.TotalSpent, newBudget, daysIntoMonth)
+	monthlyBudgetSpendCategory.DailyAllowance = dailyLeftToSpend
 	err = database.UpdateMonthlyBudgetSpendCategory(*monthlyBudgetSpendCategory)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{

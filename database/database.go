@@ -600,6 +600,270 @@ func CreatePlaidTransactions(userID int, accountID string, transactions []plaid.
 
 // ********** MONTHLY SUMMARY **********
 
+// func processDailyBalanceSingleCategory(category MonthlyBudgetSpendCategory) error {
+
+// 	// log.Printf("🔄 Monthly budget spend categories: %v", monthlyBudgetSpendCategories)
+// 	overallTotalSpent := 0.0
+// 	// // Build a list of all categories except "general"
+// 	// categoriesToExclude := []string{}
+// 	// for _, category := range monthlyBudgetSpendCategories {
+// 	// 	if category.Category != "general" {
+// 	// 		categoriesToExclude = append(categoriesToExclude, category.Category)
+// 	// 	}
+// 	// }
+
+// 	categoriesToExclude, err := GetCategoriesToExclude(userID, monthYear)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to get categories to exclude: %w", err)
+// 	}
+
+// 	// Calculate spend for each category and store initial daily allowances
+// 	type CategoryWithAllowance struct {
+// 		Category       MonthlyBudgetSpendCategory
+// 		DailyAllowance float64
+// 		IsNegative     bool
+// 	}
+
+// 	var categoriesWithAllowances []CategoryWithAllowance
+// 	var totalNegativeAllowance float64
+// 	var totalPositiveAllowance float64
+
+// 	// First pass: calculate initial daily allowances
+// 	for _, category := range monthlyBudgetSpendCategories {
+// 		var totalSpent float64
+// 		if category.Category == "general" {
+// 			totalSpent, err = calculateSpendExcludingCategories(category, categoriesToExclude)
+// 			if err != nil {
+// 				return fmt.Errorf("failed to calculate spend by category: %w", err)
+// 			}
+// 		} else {
+// 			totalSpent, err = calculateSpendByCategory(category)
+// 			if err != nil {
+// 				return fmt.Errorf("failed to calculate spend by category: %w", err)
+// 			}
+// 		}
+
+// 		daysIntoMonth := time.Now().Day()
+// 		dailyLeftToSpend := calculateDailyLeftToSpend(totalSpent, category.Budget, daysIntoMonth)
+// 		log.Printf("🔄 %s initial daily left to spend: %f", category.Category, dailyLeftToSpend)
+// 		log.Printf("🔄 %s total spent: %f", category.Category, totalSpent)
+
+// 		category.TotalSpent = totalSpent
+// 		overallTotalSpent += totalSpent
+
+// 		isNegative := dailyLeftToSpend < 0
+// 		if isNegative {
+// 			totalNegativeAllowance += dailyLeftToSpend
+// 		} else {
+// 			totalPositiveAllowance += dailyLeftToSpend
+// 		}
+
+// 		categoriesWithAllowances = append(categoriesWithAllowances, CategoryWithAllowance{
+// 			Category:       category,
+// 			DailyAllowance: dailyLeftToSpend,
+// 			IsNegative:     isNegative,
+// 		})
+// 	}
+
+// 	log.Printf("🔄 Total negative allowance: %f", totalNegativeAllowance)
+// 	log.Printf("🔄 Total positive allowance: %f", totalPositiveAllowance)
+
+// 	// Second pass: redistribute allowances
+// 	// if totalNegativeAllowance < 0 && totalPositiveAllowance > 0 {
+// 	// 	// Calculate how much we can borrow from positive categories
+// 	// 	borrowableAmount := totalPositiveAllowance
+// 	// 	neededAmount := -totalNegativeAllowance
+
+// 	// 	// If we have enough positive allowance to cover all negative, redistribute
+// 	// 	if borrowableAmount >= neededAmount {
+// 	// 		// Calculate redistribution ratio
+// 	// 		redistributionRatio := neededAmount / borrowableAmount
+
+// 	// 		for i := range categoriesWithAllowances {
+// 	// 			if categoriesWithAllowances[i].IsNegative {
+// 	// 				// Set negative categories to 0
+// 	// 				categoriesWithAllowances[i].DailyAllowance = 0
+// 	// 			} else {
+// 	// 				// Reduce positive categories proportionally
+// 	// 				categoriesWithAllowances[i].DailyAllowance = categoriesWithAllowances[i].DailyAllowance * (1 - redistributionRatio)
+// 	// 			}
+// 	// 		}
+// 	// 	} else {
+// 	// 		// Not enough positive allowance to cover all negative; keep original values (no redistribution)
+// 	// 		// This preserves negative daily allowances to reflect true deficit
+// 	// 	}
+// 	// }
+
+// 	// Update database with final allowances
+// 	for _, catWithAllowance := range categoriesWithAllowances {
+// 		catWithAllowance.Category.DailyAllowance = catWithAllowance.DailyAllowance
+// 		UpdateMonthlyBudgetSpendCategory(catWithAllowance.Category)
+// 		log.Printf("🔄 %s final daily left to spend: %f", catWithAllowance.Category.Category, catWithAllowance.DailyAllowance)
+// 	}
+
+// 	log.Printf("🔄 Total spent: %f", overallTotalSpent)
+// 	monthlySummary.TotalSpent = overallTotalSpent
+// 	monthlySummary.UpdatedAt = time.Now()
+// 	monthlySummary, err = UpdateMonthlySummaryTotalSpent(*monthlySummary)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to update monthly summary: %w", err)
+// 	}
+// 	log.Printf("🔄 Updated monthly summary: %v", monthlySummary)
+// 	return nil
+// }
+
+func ProcessDailyBalance(userID int, monthYear int) error {
+	monthlySummary, err := GetMonthlySummary(userID, monthYear)
+	if err != nil {
+		return fmt.Errorf("failed to get monthly summary: %w", err)
+	}
+	log.Printf("🔄 Monthly summary: %v", monthlySummary)
+	monthlyBudgetSpendCategories, _, err := GetMonthlyBudgetSpendCategories(monthlySummary.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get monthly budget spend categories: %w", err)
+	}
+	// log.Printf("🔄 Monthly budget spend categories: %v", monthlyBudgetSpendCategories)
+	overallTotalSpent := 0.0
+	// // Build a list of all categories except "general"
+	// categoriesToExclude := []string{}
+	// for _, category := range monthlyBudgetSpendCategories {
+	// 	if category.Category != "general" {
+	// 		categoriesToExclude = append(categoriesToExclude, category.Category)
+	// 	}
+	// }
+
+	categoriesToExclude, err := GetCategoriesToExclude(userID, monthYear)
+	if err != nil {
+		return fmt.Errorf("failed to get categories to exclude: %w", err)
+	}
+
+	// Calculate spend for each category and store initial daily allowances
+	type CategoryWithAllowance struct {
+		Category       MonthlyBudgetSpendCategory
+		DailyAllowance float64
+		IsNegative     bool
+	}
+
+	var categoriesWithAllowances []CategoryWithAllowance
+	var totalNegativeAllowance float64
+	var totalPositiveAllowance float64
+
+	// First pass: calculate initial daily allowances
+	for _, category := range monthlyBudgetSpendCategories {
+		var totalSpent float64
+		if category.Category == "general" {
+			totalSpent, err = calculateSpendExcludingCategories(category, categoriesToExclude)
+			if err != nil {
+				return fmt.Errorf("failed to calculate spend by category: %w", err)
+			}
+		} else {
+			totalSpent, err = calculateSpendByCategory(category)
+			if err != nil {
+				return fmt.Errorf("failed to calculate spend by category: %w", err)
+			}
+		}
+
+		daysIntoMonth := time.Now().Day()
+		dailyLeftToSpend := CalculateDailyLeftToSpend(totalSpent, category.Budget, daysIntoMonth)
+		log.Printf("🔄 %s initial daily left to spend: %f", category.Category, dailyLeftToSpend)
+		log.Printf("🔄 %s total spent: %f", category.Category, totalSpent)
+
+		category.TotalSpent = totalSpent
+		overallTotalSpent += totalSpent
+
+		isNegative := dailyLeftToSpend < 0
+		if isNegative {
+			totalNegativeAllowance += dailyLeftToSpend
+		} else {
+			totalPositiveAllowance += dailyLeftToSpend
+		}
+
+		categoriesWithAllowances = append(categoriesWithAllowances, CategoryWithAllowance{
+			Category:       category,
+			DailyAllowance: dailyLeftToSpend,
+			IsNegative:     isNegative,
+		})
+	}
+
+	log.Printf("🔄 Total negative allowance: %f", totalNegativeAllowance)
+	log.Printf("🔄 Total positive allowance: %f", totalPositiveAllowance)
+
+	// Second pass: redistribute allowances
+	// if totalNegativeAllowance < 0 && totalPositiveAllowance > 0 {
+	// 	// Calculate how much we can borrow from positive categories
+	// 	borrowableAmount := totalPositiveAllowance
+	// 	neededAmount := -totalNegativeAllowance
+
+	// 	// If we have enough positive allowance to cover all negative, redistribute
+	// 	if borrowableAmount >= neededAmount {
+	// 		// Calculate redistribution ratio
+	// 		redistributionRatio := neededAmount / borrowableAmount
+
+	// 		for i := range categoriesWithAllowances {
+	// 			if categoriesWithAllowances[i].IsNegative {
+	// 				// Set negative categories to 0
+	// 				categoriesWithAllowances[i].DailyAllowance = 0
+	// 			} else {
+	// 				// Reduce positive categories proportionally
+	// 				categoriesWithAllowances[i].DailyAllowance = categoriesWithAllowances[i].DailyAllowance * (1 - redistributionRatio)
+	// 			}
+	// 		}
+	// 	} else {
+	// 		// Not enough positive allowance to cover all negative; keep original values (no redistribution)
+	// 		// This preserves negative daily allowances to reflect true deficit
+	// 	}
+	// }
+
+	// Update database with final allowances
+	for _, catWithAllowance := range categoriesWithAllowances {
+		catWithAllowance.Category.DailyAllowance = catWithAllowance.DailyAllowance
+		UpdateMonthlyBudgetSpendCategory(catWithAllowance.Category)
+		log.Printf("🔄 %s final daily left to spend: %f", catWithAllowance.Category.Category, catWithAllowance.DailyAllowance)
+	}
+
+	log.Printf("🔄 Total spent: %f", overallTotalSpent)
+	monthlySummary.TotalSpent = overallTotalSpent
+	monthlySummary.UpdatedAt = time.Now()
+	monthlySummary, err = UpdateMonthlySummaryTotalSpent(*monthlySummary)
+	if err != nil {
+		return fmt.Errorf("failed to update monthly summary: %w", err)
+	}
+	log.Printf("🔄 Updated monthly summary: %v", monthlySummary)
+	return nil
+}
+
+func calculateSpendByCategory(category MonthlyBudgetSpendCategory) (float64, error) {
+	transactions, err := GetTransactionsByCategory(category.UserID, category.Category, category.MonthYear)
+	if err != nil {
+		log.Printf("❌ Failed to get transactions by category: %v", err)
+		return 0, fmt.Errorf("failed to get transactions by category: %w", err)
+	}
+	totalSpent := 0.0
+	for _, transaction := range transactions {
+		totalSpent += transaction.Amount
+	}
+	return totalSpent, nil
+}
+
+func calculateSpendExcludingCategories(category MonthlyBudgetSpendCategory, categoriesToExclude []string) (float64, error) {
+	transactions, err := GetTransactionsExcludingCategories(category.UserID, categoriesToExclude, category.MonthYear)
+	if err != nil {
+		log.Printf("❌ Failed to get transactions by category: %v", err)
+		return 0, fmt.Errorf("failed to get transactions by category: %w", err)
+	}
+	totalSpent := 0.0
+	for _, transaction := range transactions {
+		totalSpent += transaction.Amount
+	}
+	return totalSpent, nil
+}
+
+func CalculateDailyLeftToSpend(spent float64, monthly_budget float64, daysIntoMonth int) float64 {
+	daily_budget := monthly_budget / 30
+	allowance_up_to_now := daily_budget * float64(daysIntoMonth)
+	return allowance_up_to_now - spent
+}
+
 func GetTransactionsExcludingCategories(userID int, categoriesToExclude []string, monthYear int) ([]Transaction, error) {
 	year := monthYear % 10000
 	month := monthYear / 10000
