@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 	"watson/database"
 	"watson/plaid"
@@ -558,7 +559,11 @@ func (jp *JobProcessor) processInitialPlaidSync(job *Job) error {
 	}
 	// log.Printf("🔄 Job data: %v", jobData)
 	accessToken := jobData["access_token"].(string)
-	accounts, err := plaid.GetAccounts(accessToken)
+	if accessToken == "" {
+		return fmt.Errorf("access token is empty")
+	}
+	isSandbox := strings.HasPrefix(accessToken, "access-sandbox")
+	accounts, err := plaid.GetAccounts(accessToken, isSandbox)
 	if err != nil {
 		return fmt.Errorf("failed to get transactions: %w", err)
 	}
@@ -631,7 +636,7 @@ func (jp *JobProcessor) processFetchPlaidTransactions(job *Job) error {
 		now := time.Now()
 		monthYear = int(now.Month())*10000 + now.Year()
 	}
-	accessToken, err := database.GetAccessTokenFromAccountID(accountID)
+	accessToken, isSandbox, err := database.GetAccessTokenFromAccountID(accountID)
 	if err != nil {
 		return fmt.Errorf("failed to get access token from account id: %w", err)
 	}
@@ -642,7 +647,7 @@ func (jp *JobProcessor) processFetchPlaidTransactions(job *Job) error {
 	startDate := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, location).Format(time.RFC3339)
 	endDate := time.Date(year, time.Month(month+1), 0, 23, 59, 59, 0, location).Format(time.RFC3339)
 	log.Printf("🔄 Fetching transactions from %s to %s", startDate, endDate)
-	transactions, err := plaid.GetTransactions(accessToken, startDate, endDate)
+	transactions, err := plaid.GetTransactions(accessToken, startDate, endDate, isSandbox)
 	if err != nil {
 		return fmt.Errorf("failed to get transactions: %w", err)
 	}

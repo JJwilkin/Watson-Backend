@@ -63,7 +63,7 @@ func login(c *gin.Context) {
 		return
 	}
 
-	jwt, err := GenerateJWTWithDefaultExpiry(dbUser.UserID)
+	jwt, err := GenerateJWTWithDefaultExpiry(dbUser.UserID, dbUser.IsSandbox)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to generate JWT",
@@ -72,8 +72,9 @@ func login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Login successful",
 		"user": gin.H{
-			"user_id": dbUser.UserID,
-			"email":   dbUser.Email,
+			"user_id":    dbUser.UserID,
+			"email":      dbUser.Email,
+			"is_sandbox": dbUser.IsSandbox,
 		},
 		"jwt": jwt,
 	})
@@ -99,7 +100,7 @@ func register(c *gin.Context) {
 		})
 		return
 	}
-	jwt, err := GenerateJWTWithDefaultExpiry(dbUser.UserID)
+	jwt, err := GenerateJWTWithDefaultExpiry(dbUser.UserID, dbUser.IsSandbox)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to generate JWT",
@@ -117,7 +118,7 @@ func register(c *gin.Context) {
 }
 
 func isNewUser(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -140,24 +141,9 @@ func isNewUser(c *gin.Context) {
 	})
 }
 
-func getBalance(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
-	if err != nil {
-		return // AuthMiddleware already sent the response
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"balances": gin.H{
-			"month_remaining": 423,
-			"daily_remaining": 12,
-		},
-		"user_id": userIdInt,
-	})
-}
-
 // Get user by ID
 func getUser(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -180,12 +166,12 @@ func getUser(c *gin.Context) {
 }
 
 func genereateBankLink(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, isSandbox, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
 	bankLinkUrl := GetBankLinkURL()
-	temporaryJWT, err := GenerateTemporaryJWT(userIdInt)
+	temporaryJWT, err := GenerateTemporaryJWT(userIdInt, isSandbox)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to generate temporary JWT",
@@ -228,7 +214,7 @@ func genereateBankLink(c *gin.Context) {
 
 func handleTellerSuccess(c *gin.Context) {
 	var payload database.TellerPayload
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -301,12 +287,12 @@ func healthCheck(c *gin.Context) {
 
 func createLinkToken(c *gin.Context) {
 	// Get the client_user_id by searching for the current user
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, isSandbox, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
 
-	linkToken, err := plaid.CreateLinkToken(userIdInt)
+	linkToken, err := plaid.CreateLinkToken(userIdInt, isSandbox)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to create link token",
@@ -319,7 +305,7 @@ func createLinkToken(c *gin.Context) {
 }
 
 func handlePlaidSuccess(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, isSandbox, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -330,7 +316,7 @@ func handlePlaidSuccess(c *gin.Context) {
 		})
 		return
 	}
-	accessToken, itemId, err := plaid.ExchangePublicToken(payload["public_token"].(string), userIdInt)
+	accessToken, itemId, err := plaid.ExchangePublicToken(payload["public_token"].(string), userIdInt, isSandbox)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to exchange public token",
@@ -387,13 +373,13 @@ func handlePlaidSuccess(c *gin.Context) {
 }
 
 func getPlaidTransactions(c *gin.Context) {
-	_, err := AuthMiddleware(c)
+	_, isSandbox, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
 	accessToken := c.Query("access_token")
 
-	transactions, err := plaid.GetTransactions(accessToken, "2025-01-01", "2025-01-31")
+	transactions, err := plaid.GetTransactions(accessToken, "2025-01-01", "2025-01-31", isSandbox)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to get transactions",
@@ -406,12 +392,12 @@ func getPlaidTransactions(c *gin.Context) {
 }
 
 func getPlaidAccounts(c *gin.Context) {
-	_, err := AuthMiddleware(c)
+	_, isSandbox, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
 	accessToken := c.Query("access_token")
-	accounts, err := plaid.GetAccounts(accessToken)
+	accounts, err := plaid.GetAccounts(accessToken, isSandbox)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "Failed to get accounts",
@@ -426,7 +412,7 @@ func getPlaidAccounts(c *gin.Context) {
 // ** MONTHLY SUMMARY **
 
 func hasAnyMonthlySummaries(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -443,7 +429,7 @@ func hasAnyMonthlySummaries(c *gin.Context) {
 }
 
 func getMonthlySummaryOrEmpty(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -508,7 +494,7 @@ func getMonthlySummaryOrEmpty(c *gin.Context) {
 //		"budget": 1000
 //	}
 func upsertMonthlySummary(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -556,7 +542,7 @@ func upsertMonthlySummary(c *gin.Context) {
 }
 
 func updateMonthlySummary(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -634,7 +620,7 @@ func updateMonthlySummary(c *gin.Context) {
 
 func hasAnyMonthlyBalances(c *gin.Context) {
 
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -651,7 +637,7 @@ func hasAnyMonthlyBalances(c *gin.Context) {
 }
 
 func getMonthlyBalanceOrEmpty(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -669,7 +655,7 @@ func getMonthlyBalanceOrEmpty(c *gin.Context) {
 }
 
 func getOrCreateMonthlyBalance(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -693,7 +679,7 @@ func getOrCreateMonthlyBalance(c *gin.Context) {
 }
 
 func updateMonthlyBalance(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -753,7 +739,7 @@ func updateMonthlyBalance(c *gin.Context) {
 // ** MONTHLY BUDGET SPEND CATEGORY **
 
 func createMonthlyBudgetSpendCategory(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -803,7 +789,7 @@ func createMonthlyBudgetSpendCategory(c *gin.Context) {
 }
 
 func updateMonthlyBudgetSpendCategory(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -840,7 +826,7 @@ func updateMonthlyBudgetSpendCategory(c *gin.Context) {
 }
 
 func deleteMonthlyBudgetSpendCategory(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -876,7 +862,7 @@ func deleteMonthlyBudgetSpendCategory(c *gin.Context) {
 // ** SAVING GOALS **
 
 func getSavingGoals(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -894,7 +880,7 @@ func getSavingGoals(c *gin.Context) {
 
 func createSavingGoal(c *gin.Context) {
 
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -925,7 +911,7 @@ func createSavingGoal(c *gin.Context) {
 
 // ** TRANSACTIONS **
 func processDailyBalance(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -986,7 +972,7 @@ func processDailyBalance(c *gin.Context) {
 }
 
 func processDailyBalanceSync(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -1089,7 +1075,7 @@ func processDailyBalanceSync(c *gin.Context) {
 }
 
 func getTransactionsByCategory(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -1153,7 +1139,7 @@ func getTransactionsByCategory(c *gin.Context) {
 }
 
 func syncPlaidAccounts(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -1189,7 +1175,7 @@ func syncPlaidAccounts(c *gin.Context) {
 }
 
 func allAccountsSynced(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -1235,7 +1221,7 @@ func allAccountsSynced(c *gin.Context) {
 }
 
 func validateJWT(c *gin.Context) {
-	userIdInt, err := AuthMiddleware(c)
+	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
@@ -1283,7 +1269,6 @@ func main() {
 	// Routes
 	router.POST("/register", register)
 	router.GET("/users/", getUser)
-	router.GET("/balances", getBalance)
 	router.POST("/login", login)
 
 	// User
