@@ -908,8 +908,8 @@ func GetMonthlyBudgetSpendCategories(monthlySummaryID int) ([]MonthlyBudgetSpend
 }
 
 func UpdateMonthlyBudgetSpendCategory(monthlyBudgetSpendCategory MonthlyBudgetSpendCategory) error {
-	query := "UPDATE monthly_budget_spend_category SET total_spent = $1, daily_allowance = $2 WHERE id = $3"
-	_, err := DB.Exec(query, monthlyBudgetSpendCategory.TotalSpent, monthlyBudgetSpendCategory.DailyAllowance, monthlyBudgetSpendCategory.ID)
+	query := "UPDATE monthly_budget_spend_category SET total_spent = $1, daily_allowance = $2, budget = $3 WHERE id = $4"
+	_, err := DB.Exec(query, monthlyBudgetSpendCategory.TotalSpent, monthlyBudgetSpendCategory.DailyAllowance, monthlyBudgetSpendCategory.Budget, monthlyBudgetSpendCategory.ID)
 	if err != nil {
 		return fmt.Errorf("failed to update monthly budget spend category: %v", err)
 	}

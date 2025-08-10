@@ -802,6 +802,40 @@ func createMonthlyBudgetSpendCategory(c *gin.Context) {
 	})
 }
 
+func updateMonthlyBudgetSpendCategory(c *gin.Context) {
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+	var payload map[string]interface{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request body",
+		})
+		return
+	}
+	monthlyBudgetSpendCategoryID := payload["id"].(string)
+	newBudget := payload["budget"].(float64)
+	monthlyBudgetSpendCategory, _ := database.GetMonthlyBudgetSpendCategoryByID(userIdInt, monthlyBudgetSpendCategoryID)
+	if monthlyBudgetSpendCategory == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"message": "Monthly budget spend doesn't exist",
+		})
+		return
+	}
+	monthlyBudgetSpendCategory.Budget = newBudget
+	err = database.UpdateMonthlyBudgetSpendCategory(*monthlyBudgetSpendCategory)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Failed to update monthly budget spend category",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Monthly budget spend category updated successfully",
+	})
+}
+
 func deleteMonthlyBudgetSpendCategory(c *gin.Context) {
 	userIdInt, err := AuthMiddleware(c)
 	if err != nil {
@@ -1271,6 +1305,7 @@ func main() {
 
 	// Monthly Budget Spend Category
 	router.POST("/monthly-budget-spend-category", createMonthlyBudgetSpendCategory)
+	router.PUT("/monthly-budget-spend-category", updateMonthlyBudgetSpendCategory)
 	router.DELETE("/monthly-budget-spend-category/:id", deleteMonthlyBudgetSpendCategory)
 
 	// Transactions
