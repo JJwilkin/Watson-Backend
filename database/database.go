@@ -833,6 +833,16 @@ func GetMonthlyBudgetSpendCategory(userID int, monthlySummaryID int, monthYear i
 	return &monthlyBudgetSpendCategory, nil
 }
 
+func GetMonthlyBudgetSpendCategoryByID(userID int, monthlyBudgetSpendCategoryID string) (*MonthlyBudgetSpendCategory, error) {
+	query := "SELECT id, user_id, monthly_summary_id, month_year, category, budget, total_spent, daily_allowance, created_at, updated_at FROM monthly_budget_spend_category WHERE id = $1 AND user_id = $2"
+	var monthlyBudgetSpendCategory MonthlyBudgetSpendCategory
+	err := DB.QueryRow(query, monthlyBudgetSpendCategoryID, userID).Scan(&monthlyBudgetSpendCategory.ID, &monthlyBudgetSpendCategory.UserID, &monthlyBudgetSpendCategory.MonthlySummaryID, &monthlyBudgetSpendCategory.MonthYear, &monthlyBudgetSpendCategory.Category, &monthlyBudgetSpendCategory.Budget, &monthlyBudgetSpendCategory.TotalSpent, &monthlyBudgetSpendCategory.DailyAllowance, &monthlyBudgetSpendCategory.CreatedAt, &monthlyBudgetSpendCategory.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get monthly budget spend category: %v", err)
+	}
+	return &monthlyBudgetSpendCategory, nil
+}
+
 func CreateMonthlyBudgetSpendCategory(userID int, monthlySummaryID int, monthYear int, category string, budget float64) (*MonthlyBudgetSpendCategory, error) {
 	query := "INSERT INTO monthly_budget_spend_category (user_id, monthly_summary_id, month_year, category, budget, total_spent) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, user_id, monthly_summary_id, month_year, category, budget, total_spent, created_at, updated_at"
 	var monthlyBudgetSpendCategory MonthlyBudgetSpendCategory
@@ -842,6 +852,15 @@ func CreateMonthlyBudgetSpendCategory(userID int, monthlySummaryID int, monthYea
 		return nil, fmt.Errorf("failed to create monthly budget spend category: %v", err)
 	}
 	return &monthlyBudgetSpendCategory, nil
+}
+
+func DeleteMonthlyBudgetSpendCategory(userID int, monthlyBudgetSpendCategoryID string) error {
+	query := "DELETE FROM monthly_budget_spend_category WHERE id = $1 AND user_id = $2"
+	_, err := DB.Exec(query, monthlyBudgetSpendCategoryID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to delete monthly budget spend category: %v", err)
+	}
+	return nil
 }
 
 func GetCategoriesToExclude(userID int, monthYear int) ([]string, error) {

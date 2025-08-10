@@ -802,6 +802,40 @@ func createMonthlyBudgetSpendCategory(c *gin.Context) {
 	})
 }
 
+func deleteMonthlyBudgetSpendCategory(c *gin.Context) {
+	userIdInt, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+	monthlyBudgetSpendCategoryID := c.Param("id")
+	// get monthly budget spend category
+	monthlyBudgetSpendCategory, _ := database.GetMonthlyBudgetSpendCategoryByID(userIdInt, monthlyBudgetSpendCategoryID)
+	if monthlyBudgetSpendCategory == nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"message": "Monthly budget spend doesn't exist",
+		})
+		return
+	}
+
+	if monthlyBudgetSpendCategory.Category == "general" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"message": "You cannot delete the general monthly budget spend category",
+		})
+		return
+	}
+
+	err = database.DeleteMonthlyBudgetSpendCategory(userIdInt, monthlyBudgetSpendCategoryID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Failed to delete monthly budget spend category",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Monthly budget spend category deleted successfully",
+	})
+}
+
 // ** SAVING GOALS **
 
 func getSavingGoals(c *gin.Context) {
@@ -1237,6 +1271,7 @@ func main() {
 
 	// Monthly Budget Spend Category
 	router.POST("/monthly-budget-spend-category", createMonthlyBudgetSpendCategory)
+	router.DELETE("/monthly-budget-spend-category/:id", deleteMonthlyBudgetSpendCategory)
 
 	// Transactions
 	router.POST("/transactions/process-daily-balance", processDailyBalance)
