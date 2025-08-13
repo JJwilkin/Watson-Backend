@@ -1,0 +1,17 @@
+{
+    "applinks": {
+        "details": [
+            {
+                "appIDs": [
+                    "7583755R28.joshuawilkinson.watson"
+                ],
+                "components": [
+                    {
+                        "/": "/plaid/*",
+                        "comment": "Matches any URL path whose path starts with /plaid/"
+                    }
+                ]
+            }
+        ]
+    }
+}

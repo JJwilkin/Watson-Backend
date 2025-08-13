@@ -426,6 +426,25 @@ func GetAccessTokenFromAccountID(accountId string) (string, bool, error) {
 	return accessToken, isSandbox, nil
 }
 
+func GetUnprocessedPlaidTokens(userID int) ([]string, error) {
+	query := "SELECT access_token FROM plaid_tokens WHERE user_id = $1 AND is_processed = FALSE"
+	rows, err := DB.Query(query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get unprocessed plaid tokens: %v", err)
+	}
+	defer rows.Close()
+	var tokens []string
+	for rows.Next() {
+		var token string
+		err := rows.Scan(&token)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan plaid token: %v", err)
+		}
+		tokens = append(tokens, token)
+	}
+	return tokens, nil
+}
+
 func GetUserIdFromAccessToken(accessToken string) (string, int, error) {
 	query := "SELECT id, user_id, is_processed FROM plaid_tokens WHERE access_token = $1"
 	var plaidTokenID string

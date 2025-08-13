@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"watson/database"
@@ -372,6 +373,78 @@ func handlePlaidSuccess(c *gin.Context) {
 
 }
 
+func processUnprocessedPlaidTokens(c *gin.Context) {
+	userIdInt, _, err := AuthMiddleware(c)
+	if err != nil {
+		return // AuthMiddleware already sent the response
+	}
+
+	unprocessedTokens, err := database.GetUnprocessedPlaidTokens(userIdInt)
+	if err != nil {
+		log.Printf("Failed to get unprocessed Plaid tokens for user %d: %v", userIdInt, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to get unprocessed Plaid tokens",
+		})
+		return
+	}
+
+	if len(unprocessedTokens) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "No unprocessed Plaid tokens found",
+			"count":   0,
+		})
+		return
+	}
+
+	successCount := 0
+	failedCount := 0
+
+	// Process each unprocessed token
+	for _, token := range unprocessedTokens {
+		jobData := map[string]interface{}{
+			"user_id":      userIdInt,
+			"access_token": token,
+		}
+
+		enqueueRequest := map[string]interface{}{
+			"type": "initial_plaid_sync",
+			"data": jobData,
+		}
+
+		enqueueJSON, err := json.Marshal(enqueueRequest)
+		if err != nil {
+			log.Printf("Failed to marshal enqueue request for token %s: %v", token, err)
+			failedCount++
+			continue
+		}
+
+		// Make HTTP request to background worker
+		resp, err := http.Post(workerUrl+"/enqueue", "application/json", bytes.NewBuffer(enqueueJSON))
+		if err != nil {
+			log.Printf("Failed to enqueue job for token %s: %v", token, err)
+			failedCount++
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK {
+			log.Printf("Successfully enqueued initial Plaid sync job for user %d, token %s", userIdInt, token)
+			successCount++
+		} else {
+			log.Printf("Failed to enqueue job for token %s, status: %d", token, resp.StatusCode)
+			failedCount++
+		}
+	}
+
+	// Send response to client
+	c.JSON(http.StatusOK, gin.H{
+		"message":      "Processed unprocessed Plaid tokens",
+		"total_tokens": len(unprocessedTokens),
+		"successful":   successCount,
+		"failed":       failedCount,
+	})
+}
+
 func getPlaidTransactions(c *gin.Context) {
 	_, isSandbox, err := AuthMiddleware(c)
 	if err != nil {
@@ -392,11 +465,12 @@ func getPlaidTransactions(c *gin.Context) {
 }
 
 func getPlaidAccounts(c *gin.Context) {
-	_, isSandbox, err := AuthMiddleware(c)
+	_, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
 	accessToken := c.Query("access_token")
+	isSandbox := strings.HasPrefix(accessToken, "access-sandbox")
 	accounts, err := plaid.GetAccounts(accessToken, isSandbox)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -1279,8 +1353,9 @@ func main() {
 	router.POST("/bank-link-teller/success", handleTellerSuccess)
 	router.GET("/create-link-token", createLinkToken)
 	router.POST("/bank-link-plaid/success", handlePlaidSuccess)
+	router.POST("/bank-link-plaid/process-unprocessed-tokens", processUnprocessedPlaidTokens)
 	router.GET("/plaid/transactions", getPlaidTransactions)
-	router.GET("/plaid/accounts", getPlaidAccounts)
+	router.GET("/plaid/accounts", getPlaidAccounts) // TODO: remove, this/enforce userid/access_token match
 	// Monthly Summary
 	router.GET("/monthly-summary", getMonthlySummaryOrEmpty)
 	router.GET("/monthly-summary/has-any", hasAnyMonthlySummaries)
@@ -1308,6 +1383,109 @@ func main() {
 	router.POST("/saving-goal", createSavingGoal)
 	// Health check
 	router.GET("/health", healthCheck)
+
+	// Serve apple-app-site-association.json for Universal Links
+	router.GET("/.well-known/apple-app-site-association", func(c *gin.Context) {
+		// Set proper headers for Apple App Site Association
+		c.Header("Content-Type", "application/json")
+
+		// Check if file exists, if not serve the content directly
+		if _, err := os.Stat("./apple-app-site-association.json"); os.IsNotExist(err) {
+			// File doesn't exist, serve the JSON content directly
+			jsonData := `{
+    "applinks": {
+        "details": [
+            {
+                "appIDs": [
+                    "7583755R28.joshuawilkinson.watson"
+                ],
+                "components": [
+                    {
+                        "/": "/plaid/*",
+                        "comment": "Matches any URL path whose path starts with /plaid/"
+                    },
+					{
+                        "/": "/test/*",
+                        "comment": "Matches any URL path whose path starts with /test/"
+                    }
+                ]
+            }
+        ]
+    }
+}`
+			c.Data(http.StatusOK, "application/json", []byte(jsonData))
+			return
+		}
+
+		// File exists, serve it
+		c.File("./apple-app-site-association.json")
+	})
+
+	// Sample test endpoint that returns HTML
+	router.GET("/test", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html")
+		htmlContent := `<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Page</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            text-align: center; 
+            margin-top: 50px; 
+            background-color: #f0f0f0;
+        }
+        .container { 
+            background: white; 
+            padding: 30px; 
+            border-radius: 10px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        h1 { color: #333; }
+        p { color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hello World!</h1>
+        <p>This is a test endpoint from your Go API</p>
+        <p>Current time: ` + time.Now().Format("2006-01-02 15:04:05") + `</p>
+    </div>
+</body>
+</html>`
+		c.Data(http.StatusOK, "text/html", []byte(htmlContent))
+	})
+
+	// 	router.GET("/plaid", func(c *gin.Context) {
+	// 		c.Header("Content-Type", "text/html")
+	// 		htmlContent := `<!DOCTYPE html>
+	// <html lang="en">
+	// <head>
+	//   <meta charset="UTF-8" />
+	//   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	//   <title>Plaid Deep Link</title>
+	//   <style>
+	//     body { font-family: sans-serif; text-align: center; margin-top: 3rem; }
+	//     button {
+	//       padding: 0.75rem 1.5rem;
+	//       font-size: 1.2rem;
+	//       background: #007aff;
+	//       color: white;
+	//       border: none;
+	//       border-radius: 8px;
+	//     }
+	//   </style>
+	// </head>
+	// <body>
+	//   <h1>Open in Watson</h1>
+	//   <p>If you have the app, you can open this directly.</p>
+	//   <button onclick="window.location='watson://plaid'">Go back to Watson</button>
+	// </body>
+	// </html>`
+	// 		c.Data(http.StatusOK, "text/html", []byte(htmlContent))
+	// 	})
 
 	config := LoadConfig()
 	serverAddr := "0.0.0.0:" + config.ServerPort

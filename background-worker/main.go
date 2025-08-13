@@ -563,6 +563,8 @@ func (jp *JobProcessor) processInitialPlaidSync(job *Job) error {
 		return fmt.Errorf("access token is empty")
 	}
 	isSandbox := strings.HasPrefix(accessToken, "access-sandbox")
+	log.Printf("access token: %s", accessToken)
+	log.Printf("is this sandbox? %v", isSandbox)
 	accounts, err := plaid.GetAccounts(accessToken, isSandbox)
 	if err != nil {
 		return fmt.Errorf("failed to get transactions: %w", err)
