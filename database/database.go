@@ -563,16 +563,16 @@ func CreatePlaidTransactions(userID int, accountID string, transactions []plaid.
 		return nil
 	}
 
-	// Build bulk insert query
-	query := "INSERT INTO transactions (user_id, plaid_account_id, plaid_transaction_id, amount, date, description, category, currency, status, type, provider_type) VALUES "
+	// Build bulk upsert query with ON CONFLICT handling
+	query := "INSERT INTO transactions (user_id, plaid_account_id, plaid_transaction_id, amount, date, description, category, currency, status, type, provider_type, updated_at) VALUES "
 
-	values := make([]interface{}, 0, len(transactions)*11)
+	values := make([]interface{}, 0, len(transactions)*12)
 	placeholders := make([]string, 0, len(transactions))
 
 	for i, transaction := range transactions {
-		start := i * 11
-		placeholders = append(placeholders, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
-			start+1, start+2, start+3, start+4, start+5, start+6, start+7, start+8, start+9, start+10, start+11))
+		start := i * 12
+		placeholders = append(placeholders, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+			start+1, start+2, start+3, start+4, start+5, start+6, start+7, start+8, start+9, start+10, start+11, start+12))
 
 		// Handle category array - convert to JSONB format
 		categorySlice := transaction.GetCategory()
@@ -607,10 +607,21 @@ func CreatePlaidTransactions(userID int, accountID string, transactions []plaid.
 			status,
 			transaction.GetPaymentChannel(),
 			"plaid",
+			time.Now(), // updated_at timestamp
 		)
 	}
 
 	query += strings.Join(placeholders, ", ")
+	query += " ON CONFLICT (plaid_transaction_id) DO UPDATE SET "
+	query += "amount = EXCLUDED.amount, "
+	query += "date = EXCLUDED.date, "
+	query += "description = EXCLUDED.description, "
+	query += "category = EXCLUDED.category, "
+	query += "currency = EXCLUDED.currency, "
+	query += "status = EXCLUDED.status, "
+	query += "type = EXCLUDED.type, "
+	query += "updated_at = EXCLUDED.updated_at"
+
 	_, err := DB.Exec(query, values...)
 	if err != nil {
 		return fmt.Errorf("failed to upsert plaid transactions: %v", err)

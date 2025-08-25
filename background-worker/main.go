@@ -2,10 +2,8 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -13,187 +11,171 @@ import (
 	"time"
 	"watson/database"
 	"watson/plaid"
-
-	"github.com/redis/go-redis/v9"
 )
 
 var ctx = context.Background()
 
-// TellerAccount represents an account from the Teller API
-type TellerAccount struct {
-	ID                  string `json:"id"`
-	TellerInstitutionID string `json:"teller_institution_id"`
-	EnrollmentID        string `json:"enrollment_id"`
-	Name                string `json:"name"`
-	Type                string `json:"type"`
-	Subtype             string `json:"subtype"`
-	Currency            string `json:"currency"`
-	LastFour            string `json:"last_four"`
-	Status              string `json:"status"`
-	Institution         struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"institution"`
-	Links struct {
-		Self         string `json:"self"`
-		Details      string `json:"details"`
-		Balances     string `json:"balances"`
-		Transactions string `json:"transactions"`
-	} `json:"links"`
-}
+// MarkJobStatus updates the status of a job
 
-// TellerTransaction represents a transaction from the Teller API
-type TellerTransaction struct {
-	ID             string `json:"id"`
-	AccountID      string `json:"account_id"`
-	Amount         string `json:"amount"` // Amount is a string in Teller API
-	Description    string `json:"description"`
-	Date           string `json:"date"`
-	Type           string `json:"type"`
-	Status         string `json:"status"`
-	RunningBalance string `json:"running_balance"` // Can be null, so using string
-	Details        struct {
-		ProcessingStatus string `json:"processing_status"`
-		Category         string `json:"category"`
-		Counterparty     struct {
-			Name string `json:"name"`
-			Type string `json:"type"`
-		} `json:"counterparty"`
-	} `json:"details"`
-	Links struct {
-		Self    string `json:"self"`
-		Account string `json:"account"`
-	} `json:"links"`
-}
+// UpdateJobProgress updates the progress of a job
+// func (jp *JobProcessor) UpdateJobProgress(jobID string, progress string) error {
+// 	return jp.rdb.HSet(ctx, jobID, "progress", progress).Err()
+// }
 
-// Job represents a task to be processed
-type Job struct {
-	ID        string          `json:"id"`
-	Type      string          `json:"type"`
-	Data      json.RawMessage `json:"data"`
-	CreatedAt time.Time       `json:"created_at"`
-}
-
-// EnqueueRequest represents the request body for enqueueing jobs
-type EnqueueRequest struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data"`
-}
-
-// EnqueueResponse represents the response when enqueueing a job
-type EnqueueResponse struct {
-	Success bool   `json:"success"`
-	JobID   string `json:"job_id,omitempty"`
-	Message string `json:"message,omitempty"`
-}
-
-// JobProcessor handles job processing
-type JobProcessor struct {
-	rdb        *redis.Client
-	httpClient *http.Client
-}
-
-// NewJobProcessor creates a new job processor
-func NewJobProcessor(addr string) *JobProcessor {
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: "",
-		DB:       0,
-	})
-	// Load client certificates
-	cert, err := tls.LoadX509KeyPair("./certs/certificate.pem", "./certs/private_key.pem")
+// GetJobStatus retrieves the status of a job
+func (jp *JobProcessor) GetJobStatus(jobID string) (string, error) {
+	result, err := jp.rdb.HGet(ctx, jobID, "status").Result()
 	if err != nil {
-		log.Fatal("Failed to load client certificates:", err)
+		return "", err
 	}
-
-	// Create TLS config with client certificates
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
-	}
-
-	// Create HTTP client with custom transport
-	httpClient := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
-	}
-	return &JobProcessor{rdb: rdb, httpClient: httpClient}
+	return result, nil
 }
 
-// EnqueueJob adds a job to the queue
-func (jp *JobProcessor) EnqueueJob(jobType string, data json.RawMessage) error {
-	job := Job{
-		ID:        fmt.Sprintf("job_%d", time.Now().UnixNano()),
-		Type:      jobType,
-		Data:      data,
-		CreatedAt: time.Now(),
-	}
-
-	jobJSON, err := json.Marshal(job)
+func (jp *JobProcessor) GetJobStatusByID(jobId string) (string, error) {
+	result, err := jp.rdb.HGet(ctx, jobId, "status").Result()
 	if err != nil {
-		return fmt.Errorf("failed to marshal job: %w", err)
+		return "", err
 	}
+	return result, nil
+}
 
-	// Add job to the queue (using LPUSH to add to the left of the list)
-	err = jp.rdb.LPush(ctx, "job_queue", jobJSON).Err()
-	if err != nil {
-		return fmt.Errorf("failed to enqueue job: %w", err)
+// GetJob retrieves a complete job by ID
+// func (jp *JobProcessor) GetJob(jobID string) (*Job, error) {
+// 	jobKey := fmt.Sprintf("job:%s", jobID)
+// 	result, err := jp.rdb.HGetAll(ctx, jobKey).Result()
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	job := &Job{ID: jobID}
+// 	for key, value := range result {
+// 		switch key {
+// 		case "type":
+// 			job.Type = value
+// 		case "progress":
+// 			if progress, err := strconv.Atoi(value); err == nil {
+// 				job.Progress = progress
+// 			}
+// 		case "error":
+// 			job.Error = value
+// 		case "created_at":
+// 			if t, err := time.Parse(time.RFC3339, value); err == nil {
+// 				job.CreatedAt = t
+// 			}
+// 		case "started_at":
+// 			if t, err := time.Parse(time.RFC3339, value); err == nil {
+// 				job.StartedAt = &t
+// 			}
+// 		case "completed_at":
+// 			if t, err := time.Parse(time.RFC3339, value); err == nil {
+// 				job.CompletedAt = &t
+// 			}
+// 		}
+// 	}
+
+// 	return job, nil
+// }
+
+func (jp *JobProcessor) functionMap(name string) func(job *Job) error {
+	switch name {
+	case "job_monitor":
+		return jp.processJobMonitor
+	case "process_daily_balance":
+		return jp.processDailyBalance
+	case "fetch_plaid_transactions":
+		return jp.processFetchPlaidTransactions
+	case "fetch_all_new_transactions":
+		return jp.fetchAllNewTransactions
+	case "initial_plaid_sync":
+		return jp.processInitialPlaidSync
 	}
-
-	log.Printf("✅ Enqueued job: %s (Type: %s)", job.ID, job.Type)
 	return nil
 }
 
-// DequeueJob removes and returns a job from the queue
-func (jp *JobProcessor) DequeueJob() (*Job, error) {
-	// Use BRPOP to block until a job is available (timeout: 5 seconds)
-	result, err := jp.rdb.BRPop(ctx, 5*time.Second, "job_queue").Result()
-	if err != nil {
-		if err == redis.Nil {
-			return nil, nil // No jobs available
-		}
-		return nil, fmt.Errorf("failed to dequeue job: %w", err)
+// func (jp *JobProcessor) createAndEnqueueJobBatch(jobs []Job, onComplete string, onCompleteData json.RawMessage) error {
+// 	// for each job, enqueue it, adding a batch_id to the jobs, and then create a job monitor job with the batch_id
+// 	// this will check the status of the jobs, and re-enqueue the monitor job if any of the jobs are not completed
+// 	// after all jobs are completed, takes in a callback function to run after all jobs are completed
+// 	batchID := fmt.Sprintf("batch_%d", time.Now().UnixNano())
+// 	batchKey := fmt.Sprintf("batch:%s", batchID)
+// 	for i := range jobs {
+// 		jobs[i].BatchID = batchID
+// 		jobPtr := &jobs[i]
+// 		jp.EnqueueJob(jobPtr)
+// 		jp.rdb.LPush(ctx, batchKey, jobs[i].ID)
+// 	}
+
+// 	err := jp.createAndEnqueueJob("job_monitor", onCompleteData, batchID, onComplete)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to create and enqueue job monitor: %w", err)
+// 	}
+// 	return nil
+// }
+
+// EnqueueJob adds a job to the queue
+func (jp *JobProcessor) createAndEnqueueJob(jobType string, data json.RawMessage, batchID string, onCompleteJobId string) error {
+	job := &Job{
+		ID:              fmt.Sprintf("job_%d", time.Now().UnixNano()),
+		BatchID:         batchID,
+		Type:            jobType,
+		Data:            data,
+		CreatedAt:       time.Now(),
+		Progress:        "pending",
+		OnCompleteJobId: onCompleteJobId,
 	}
 
-	if len(result) < 2 {
-		return nil, fmt.Errorf("unexpected result format")
-	}
-
-	jobJSON := result[1] // result[0] is the key name, result[1] is the value
-	var job Job
-	err = json.Unmarshal([]byte(jobJSON), &job)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal job: %w", err)
-	}
-
-	return &job, nil
+	return jp.EnqueueJob(job)
 }
+
+// Note: DequeueJob is implemented in jobqueue.go
 
 // ProcessJob handles the actual job processing
 func (jp *JobProcessor) ProcessJob(job *Job) error {
 	log.Printf("🔄 Processing job: %s (Type: %s)", job.ID, job.Type)
 
+	// Update progress to 10% (started)
+	jp.UpdateJobStatus(job.ID, "processing")
+
+	var err error
 	switch job.Type {
 	case "hello_world":
-		return jp.processHelloWorld(job)
+		err = jp.processHelloWorld(job)
 	case "print_message":
-		return jp.processPrintMessage(job)
-	case "new_teller_link":
-		return jp.processTellerSuccess(job)
-	case "fetch_transactions":
-		return jp.processFetchTransactions(job)
+		err = jp.processPrintMessage(job)
 	case "initial_plaid_sync":
-		return jp.processInitialPlaidSync(job)
+		err = jp.processInitialPlaidSync(job)
 	case "fetch_plaid_transactions":
-		return jp.processFetchPlaidTransactions(job)
-	case "sync_plaid_accounts":
-		return jp.syncPlaidAccounts(job)
+		err = jp.processFetchPlaidTransactions(job)
+	case "fetch_all_new_transactions":
+		err = jp.fetchAllNewTransactions(job)
 	case "process_daily_balance":
-		return jp.processDailyBalance(job)
+		err = jp.processDailyBalance(job)
+	case "job_monitor":
+		err = jp.processJobMonitor(job)
 	default:
-		return fmt.Errorf("unknown job type: %s", job.Type)
+		err = fmt.Errorf("unknown job type: %s", job.Type)
 	}
+
+	// Update progress to 90% (almost done)
+
+	// Mark job as completed or failed
+	if err != nil {
+		// jp.MarkJobStatus(job.ID, "failed")
+		jp.MarkJobAsFailed(job.ID)
+		jp.rdb.HSet(ctx, fmt.Sprintf("job:%s", job.ID), "error", err.Error())
+		return err
+	}
+
+	// Update progress to 100% (completed)
+	jp.MarkJobAsCompleted(job.ID)
+
+	// enqueue the on complete job if it exists
+	if job.OnCompleteJobId != "" {
+		jp.EnqueueJobId(job.OnCompleteJobId)
+		log.Printf("✅ Enqueued on complete job: %s", job.OnCompleteJobId)
+	}
+
+	return nil
 }
 
 // processHelloWorld handles hello world jobs
@@ -212,340 +194,10 @@ func (jp *JobProcessor) processPrintMessage(job *Job) error {
 	fmt.Printf("📝 Message: %s (Job ID: %s)\n", string(job.Data), job.ID)
 
 	// Simulate some processing time
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	log.Printf("✅ Completed print message job: %s", job.ID)
 	return nil
-}
-
-func (jp *JobProcessor) processFetchTransactions(job *Job) error {
-	log.Printf("🔄 Processing fetch transactions job: %s", job.ID)
-
-	// Parse job data to get account ID and user ID
-	var jobData map[string]interface{}
-	if err := json.Unmarshal([]byte(job.Data), &jobData); err != nil {
-		return fmt.Errorf("failed to parse job data: %w", err)
-	}
-
-	transactions_link, ok := jobData["transactions_link"].(string)
-	if !ok {
-		return fmt.Errorf("transactions_link not found in job data")
-	}
-
-	access_token, ok := jobData["access_token"].(string)
-	if !ok {
-		return fmt.Errorf("access_token not found in job data")
-	}
-
-	user_id, ok := jobData["user_id"].(float64) // JSON numbers are unmarshaled as float64
-	if !ok {
-		return fmt.Errorf("user_id not found in job data")
-	}
-
-	teller_institution_id, ok := jobData["teller_institution_id"].(string)
-	if !ok {
-		return fmt.Errorf("teller_institution_id not found in job data")
-	}
-
-	account_id, ok := jobData["account_id"].(string)
-	if !ok {
-		return fmt.Errorf("account_id not found in job data")
-	}
-
-	transactions, err := jp.fetchTellerTransactions(transactions_link, access_token)
-	if err != nil {
-		return fmt.Errorf("failed to fetch transactions: %w", err)
-	}
-
-	// Save all transactions to the database in a single batch
-	savedTransactions, err := jp.SaveTellerTransactions(int(user_id), teller_institution_id, account_id, transactions)
-	if err != nil {
-		return fmt.Errorf("failed to save transactions: %w", err)
-	}
-
-	log.Printf("✅ Fetched and saved %d transactions for account: %s", len(savedTransactions), transactions_link)
-	return nil
-}
-
-func (jp *JobProcessor) fetchTellerTransactions(transactions_link string, access_token string) ([]TellerTransaction, error) {
-	log.Printf("🔄 Fetching Teller transactions for link: %s", transactions_link)
-
-	// Create request to Teller API
-	req, err := http.NewRequest("GET", transactions_link, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Set basic auth (username is access token, password is empty)
-	req.SetBasicAuth(access_token, "")
-
-	// Make the request
-	resp, err := jp.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse accounts from response
-	var transactions []TellerTransaction
-	if err := json.Unmarshal(body, &transactions); err != nil {
-		return nil, fmt.Errorf("failed to parse transactions response: %w", err)
-	}
-
-	log.Printf("✅ Successfully fetched %d transactions from Teller API", len(transactions))
-	return transactions, nil
-}
-
-// processTellerSuccess handles Teller success jobs
-func (jp *JobProcessor) processTellerSuccess(job *Job) error {
-	log.Printf("🔄 Processing Teller success job: %s", job.ID)
-
-	// Parse job data to get access token and user ID
-	var jobData map[string]interface{}
-	if err := json.Unmarshal([]byte(job.Data), &jobData); err != nil {
-		return fmt.Errorf("failed to parse job data: %w", err)
-	}
-
-	// Extract access token and user ID from job data
-	accessToken, ok := jobData["token"].(string)
-	if !ok {
-		return fmt.Errorf("access token not found in job data")
-	}
-
-	userID, ok := jobData["user_id"].(float64) // JSON numbers are unmarshaled as float64
-	if !ok {
-		return fmt.Errorf("user_id not found in job data")
-	}
-
-	// Call the Teller API to fetch accounts
-	accounts, err := jp.fetchTellerAccounts(accessToken)
-	if err != nil {
-		return fmt.Errorf("failed to fetch Teller accounts: %w", err)
-	}
-
-	createdAccounts := []TellerAccount{}
-	// Save each account to the database
-	for _, account := range accounts {
-		savedAccount, err := jp.SaveTellerAccount(int(userID), accessToken, account)
-		if err != nil {
-			log.Printf("❌ Failed to save account %s: %v", account.ID, err)
-			continue
-		}
-		log.Printf("✅ Saved account: %s (%s) - %s", savedAccount.Name, savedAccount.Type, savedAccount.Institution.Name)
-		createdAccounts = append(createdAccounts, *savedAccount)
-	}
-
-	log.Printf("✅ Completed Teller success job: %s", job.ID)
-	// enqueue job to fetch transactions for each teller account
-	for _, account := range createdAccounts {
-		// Create JSON data for the fetch_transactions job
-		jobData := map[string]interface{}{
-			"account_id":            account.ID,
-			"user_id":               int(userID),
-			"access_token":          accessToken,
-			"transactions_link":     account.Links.Transactions,
-			"teller_institution_id": account.TellerInstitutionID,
-		}
-		jobDataJSON, _ := json.Marshal(jobData)
-		jp.EnqueueJob("fetch_transactions", jobDataJSON)
-	}
-	return nil
-}
-
-// SaveTellerTransactions saves multiple Teller transactions to the database in a single batch
-func (jp *JobProcessor) SaveTellerTransactions(userID int, teller_institution_id string, teller_account_id string, transactions []TellerTransaction) ([]TellerTransaction, error) {
-	if len(transactions) == 0 {
-		return []TellerTransaction{}, nil
-	}
-
-	// Start a transaction for batch insert
-	tx, err := database.DB.Begin()
-	if err != nil {
-		return nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback() // Will be ignored if tx.Commit() is called
-
-	// Prepare the batch insert statement
-	query := `
-		INSERT INTO transactions (
-			user_id, teller_institution_id, teller_account_id, teller_transaction_id,
-			amount, description, date, type, status, running_balance,
-			processing_status, category, counterparty_name, counterparty_type,
-			self_link, account_link, created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-		) ON CONFLICT (id) DO UPDATE SET
-			amount = EXCLUDED.amount,
-			description = EXCLUDED.description,
-			date = EXCLUDED.date,
-			type = EXCLUDED.type,
-			status = EXCLUDED.status,
-			running_balance = EXCLUDED.running_balance,
-			processing_status = EXCLUDED.processing_status,
-			category = EXCLUDED.category,
-			counterparty_name = EXCLUDED.counterparty_name,
-			counterparty_type = EXCLUDED.counterparty_type,
-			self_link = EXCLUDED.self_link,
-			account_link = EXCLUDED.account_link,
-			updated_at = CURRENT_TIMESTAMP
-		RETURNING id, user_id, teller_transaction_id, amount, description, date, type, status, running_balance,
-			processing_status, category, counterparty_name, counterparty_type, self_link, account_link, created_at, updated_at
-	`
-
-	// Prepare the statement
-	stmt, err := tx.Prepare(query)
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	defer stmt.Close()
-
-	// Insert all transactions
-	var savedTransactions []TellerTransaction
-	for _, transaction := range transactions {
-		var savedTransaction TellerTransaction
-		var dbID string
-		var dbUserID int
-		var createdAt, updatedAt time.Time
-
-		err := stmt.QueryRow(
-			userID, teller_institution_id, teller_account_id, transaction.ID,
-			transaction.Amount, transaction.Description, transaction.Date, transaction.Type, transaction.Status, transaction.RunningBalance,
-			transaction.Details.ProcessingStatus, transaction.Details.Category, transaction.Details.Counterparty.Name, transaction.Details.Counterparty.Type,
-			transaction.Links.Self, transaction.Links.Account,
-		).Scan(
-			&dbID, &dbUserID, &savedTransaction.ID, &savedTransaction.Amount, &savedTransaction.Description,
-			&savedTransaction.Date, &savedTransaction.Type, &savedTransaction.Status, &savedTransaction.RunningBalance,
-			&savedTransaction.Details.ProcessingStatus, &savedTransaction.Details.Category,
-			&savedTransaction.Details.Counterparty.Name, &savedTransaction.Details.Counterparty.Type,
-			&savedTransaction.Links.Self, &savedTransaction.Links.Account, &createdAt, &updatedAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to insert transaction %s: %w", transaction.ID, err)
-		}
-
-		savedTransaction.AccountID = transaction.AccountID
-		savedTransactions = append(savedTransactions, savedTransaction)
-	}
-
-	// Commit the transaction
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	log.Printf("✅ Successfully saved %d transactions to database", len(savedTransactions))
-	return savedTransactions, nil
-}
-
-// SaveTellerAccount saves a Teller account to the database and returns the saved account
-func (jp *JobProcessor) SaveTellerAccount(userID int, accessToken string, account TellerAccount) (*TellerAccount, error) {
-	query := `
-		INSERT INTO teller_accounts (
-			id, user_id, teller_institution_id, enrollment_id, 
-			account_name, account_type, account_subtype, currency, last_four, status,
-			institution_id, institution_name, self_link, details_link, balances_link, transactions_link
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
-		) ON CONFLICT (id) DO UPDATE SET
-			account_name = EXCLUDED.account_name,
-			account_type = EXCLUDED.account_type,
-			account_subtype = EXCLUDED.account_subtype,
-			currency = EXCLUDED.currency,
-			last_four = EXCLUDED.last_four,
-			status = EXCLUDED.status,
-			institution_name = EXCLUDED.institution_name,
-			self_link = EXCLUDED.self_link,
-			details_link = EXCLUDED.details_link,
-			balances_link = EXCLUDED.balances_link,
-			transactions_link = EXCLUDED.transactions_link,
-			updated_at = CURRENT_TIMESTAMP
-		RETURNING id, user_id, account_name, account_type, account_subtype, institution_name, self_link, details_link, balances_link, transactions_link,
-			created_at, updated_at
-	`
-
-	// Get the teller_institution_id for this user and enrollment
-	var tellerInstitutionID string
-	err := database.DB.QueryRow(
-		"SELECT id FROM teller_institutions WHERE user_id = $1 AND access_token = $2",
-		userID, accessToken,
-	).Scan(&tellerInstitutionID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get teller institution ID: %w", err)
-	}
-
-	// Execute the query and scan the returned data
-	var savedAccount TellerAccount
-	var dbUserID int
-	var createdAt, updatedAt time.Time
-
-	err = database.DB.QueryRow(query,
-		account.ID, userID, tellerInstitutionID, account.EnrollmentID,
-		account.Name, account.Type, account.Subtype, account.Currency, account.LastFour, account.Status,
-		account.Institution.ID, account.Institution.Name,
-		account.Links.Self, account.Links.Details, account.Links.Balances, account.Links.Transactions,
-	).Scan(
-		&savedAccount.ID, &dbUserID, &savedAccount.Name, &savedAccount.Type, &savedAccount.Subtype, &savedAccount.Institution.Name, &savedAccount.Links.Self, &savedAccount.Links.Details, &savedAccount.Links.Balances, &savedAccount.Links.Transactions,
-		&createdAt, &updatedAt,
-	)
-
-	savedAccount.TellerInstitutionID = tellerInstitutionID
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to save teller account: %w", err)
-	}
-
-	return &savedAccount, nil
-}
-
-// fetchTellerAccounts fetches accounts from Teller API using client certificates
-func (jp *JobProcessor) fetchTellerAccounts(accessToken string) ([]TellerAccount, error) {
-	log.Printf("🔄 Fetching Teller accounts for token: %.10s...", accessToken)
-
-	// Create request to Teller API
-	req, err := http.NewRequest("GET", "https://api.teller.io/accounts", nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Set basic auth (username is access token, password is empty)
-	req.SetBasicAuth(accessToken, "")
-
-	// Make the request
-	resp, err := jp.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse accounts from response
-	var accounts []TellerAccount
-	if err := json.Unmarshal(body, &accounts); err != nil {
-		return nil, fmt.Errorf("failed to parse accounts response: %w", err)
-	}
-
-	log.Printf("✅ Successfully fetched %d accounts from Teller API", len(accounts))
-	return accounts, nil
 }
 
 // PLAID
@@ -589,37 +241,76 @@ func (jp *JobProcessor) processInitialPlaidSync(job *Job) error {
 	log.Printf("✅ Completed initial Plaid sync job: %s", job.ID)
 
 	// enqueue job to fetch transactions for each plaid account
-	for _, account := range accounts {
-		jobData := map[string]interface{}{
-			"account_id": account.GetAccountId(),
-			"user_id":    userID,
-		}
-		jobDataJSON, _ := json.Marshal(jobData)
-		jp.EnqueueJob("fetch_plaid_transactions", jobDataJSON)
+	newJobData := map[string]interface{}{
+		"user_id":    userID,
+		"month_year": GetCurrentMonthYear(),
 	}
+	newJobDataJSON, _ := json.Marshal(newJobData)
+	newJob, _ := jp.CreateJob("fetch_all_new_transactions", newJobDataJSON)
+	jp.EnqueueJob(newJob)
 	return nil
 }
 
-func (jp *JobProcessor) syncPlaidAccounts(job *Job) error {
+func (jp *JobProcessor) fetchAllNewTransactions(job *Job) error {
 	var jobData map[string]interface{}
 	if err := json.Unmarshal([]byte(job.Data), &jobData); err != nil {
 		return fmt.Errorf("failed to parse job data: %w", err)
 	}
 	// log.Printf("🔄 Job data: %v", jobData)
 	userID := int(jobData["user_id"].(float64))
+	monthYear := int(jobData["month_year"].(float64))
 	// get plaid account by UserId
 	accounts, err := database.GetPlaidAccountsByUserID(userID)
 	if err != nil {
 		return fmt.Errorf("failed to get plaid accounts by user id: %w", err)
 	}
+	jobs := []*Job{}
 	for _, accountID := range accounts {
 		jobData := map[string]interface{}{
 			"account_id": accountID,
 			"user_id":    userID,
+			"month_year": monthYear,
 		}
 		jobDataJSON, _ := json.Marshal(jobData)
-		jp.EnqueueJob("fetch_plaid_transactions", jobDataJSON)
+		jobs = append(jobs, &Job{
+			Type: "fetch_all_new_transactions",
+			Data: jobDataJSON,
+		})
 	}
+	// jp.createAndEnqueueJobBatch(jobs, "fetch_all_new_transactions", json.RawMessage(`{}`))
+	//callback job
+	callBackJobData := map[string]interface{}{
+		"user_id":    userID,
+		"month_year": monthYear,
+	}
+	callBackJobDataJSON, _ := json.Marshal(callBackJobData)
+	callbackJob, _ := jp.CreateAndStoreJob("process_daily_balance", callBackJobDataJSON)
+	bulkJob, err := jp.CreateBulkJob(jobs, callbackJob.ID)
+	if err != nil {
+		return fmt.Errorf("failed to create bulk job: %w", err)
+	}
+	jp.EnqueueBulkJob(bulkJob.ID)
+	return nil
+}
+
+func (jp *JobProcessor) checkBulkJobStatus(job *Job) error {
+	bulkJobId := job.ID
+	onCompleteJobId := job.OnCompleteJobId
+	count, err := jp.CheckBulkJobStatus(bulkJobId)
+	if err != nil {
+		return fmt.Errorf("failed to check bulk job status: %w", err)
+	}
+
+	if count == 0 {
+		jp.rdb.LRem(ctx, bulkJobQueue, 1, bulkJobId).Err()
+		if onCompleteJobId != "" {
+			jp.EnqueueJobId(onCompleteJobId)
+		}
+	} else {
+		// put the job back into the pending queue
+		jp.rdb.LPush(ctx, pendingJobQueue, bulkJobId).Err()
+	}
+
 	return nil
 }
 
@@ -659,7 +350,7 @@ func (jp *JobProcessor) processFetchPlaidTransactions(job *Job) error {
 	if err != nil {
 		return fmt.Errorf("failed to create plaid transactions: %w", err)
 	}
-
+	log.Printf("✅ Created %d transactions", len(transactions))
 	// Mark plaid Account as synced
 	err = database.MarkPlaidAccountAsSynced(accountID)
 	if err != nil {
@@ -681,10 +372,38 @@ func (jp *JobProcessor) processDailyBalance(job *Job) error {
 
 	err := database.ProcessDailyBalance(userID, monthYear)
 	if err != nil {
-		log.Printf("❌ Worker %d: Error dequeuing job: %v", job.ID, err)
+		log.Printf("❌ Worker %s: Error dequeuing job: %v", job.ID, err)
 		return err
 	}
 	log.Printf("✅ Finished daily balance job: %s", job.ID)
+	return nil
+}
+
+// processJobMonitor monitors the progress of multiple jobs
+func (jp *JobProcessor) processJobMonitor(job *Job) error {
+	log.Printf("🔄 Processing job monitor: %s", job.ID)
+
+	var jobData map[string]interface{}
+	if err := json.Unmarshal([]byte(job.Data), &jobData); err != nil {
+		return fmt.Errorf("failed to parse job data: %w", err)
+	}
+
+	batchID := jobData["batch_id"].(string)
+	jobs, err := jp.rdb.LRange(ctx, batchID, 0, -1).Result()
+	if err != nil {
+		return fmt.Errorf("failed to get jobs: %w", err)
+	}
+
+	for _, jobID := range jobs {
+		jobStatus, err := jp.GetJobStatusByID(jobID)
+		if err != nil {
+			return fmt.Errorf("failed to get job: %w", err)
+		}
+		if jobStatus == "completed" {
+			jp.rdb.LRem(ctx, batchID, 1, jobID)
+		}
+	}
+
 	return nil
 }
 
@@ -710,6 +429,48 @@ func (jp *JobProcessor) StartWorker(workerID int) {
 		if err != nil {
 			log.Printf("❌ Worker %d: Error processing job %s: %v", workerID, job.ID, err)
 		}
+
+		// Clean up completed jobs from processing queue
+		go jp.cleanupCompletedJobs()
+	}
+}
+
+// cleanupCompletedJobs removes completed jobs from the processing queue
+func (jp *JobProcessor) cleanupCompletedJobs() {
+	// Get all jobs from processing queue
+	jobs, err := jp.rdb.LRange(ctx, "processing_queue", 0, -1).Result()
+	if err != nil {
+		log.Printf("Warning: failed to get processing queue: %v", err)
+		return
+	}
+
+	for _, jobJSON := range jobs {
+		var job Job
+		if err := json.Unmarshal([]byte(jobJSON), &job); err != nil {
+			log.Printf("Warning: failed to unmarshal job: %v", err)
+			continue
+		}
+
+		// Check if job is completed or failed
+		status, err := jp.GetJobStatus(job.ID)
+		if err != nil {
+			log.Printf("Warning: failed to get status for job %s: %v", job.ID, err)
+			continue
+		}
+
+		// Remove completed/failed jobs from processing queue
+		if status == "completed" || status == "failed" {
+			removed, err := jp.rdb.LRem(ctx, "processing_queue", 1, jobJSON).Result()
+			if err != nil {
+				log.Printf("Warning: failed to remove job %s from processing queue: %v", job.ID, err)
+				continue
+			}
+
+			// Only log if we actually removed the job
+			if removed > 0 {
+				log.Printf("🧹 Cleaned up %s job %s from processing queue", status, job.ID)
+			}
+		}
 	}
 }
 
@@ -722,19 +483,41 @@ func (jp *JobProcessor) StartWorkers(numWorkers int) {
 	}
 }
 
+func (jp *JobProcessor) StartBulkJobWorker() {
+	log.Printf("🚀 Starting bulk job worker...")
+
+	for {
+		jobCompleted, err := jp.DequeueOrRequeueBulkJob()
+		if err != nil {
+			log.Printf("❌ Worker: Error dequeuing bulk job: %v", err)
+			continue
+		}
+		if jobCompleted {
+			log.Printf("✅ Bulk job completed")
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
 // EnqueueSampleJobs adds some sample jobs to the queue
 func (jp *JobProcessor) EnqueueSampleJobs() {
 	log.Println("📤 Enqueueing sample jobs...")
 
 	// Enqueue some hello world jobs
-	jp.EnqueueJob("hello_world", json.RawMessage(`"Welcome to Redis!"`))
-	jp.EnqueueJob("hello_world", json.RawMessage(`"Processing jobs in background"`))
-	jp.EnqueueJob("hello_world", json.RawMessage(`"Redis queue is awesome"`))
+	job1, _ := jp.CreateJob("hello_world", json.RawMessage(`"Welcome to Redis!"`))
+	jp.EnqueueJob(job1)
+	job2, _ := jp.CreateJob("hello_world", json.RawMessage(`"Processing jobs in background"`))
+	jp.EnqueueJob(job2)
+	job3, _ := jp.CreateJob("hello_world", json.RawMessage(`"Redis queue is awesome"`))
+	jp.EnqueueJob(job3)
 
 	// Enqueue some print message jobs
-	jp.EnqueueJob("print_message", json.RawMessage(`"This is a test message"`))
-	jp.EnqueueJob("print_message", json.RawMessage(`"Background processing works!"`))
-	jp.EnqueueJob("print_message", json.RawMessage(`"Redis + Go = ❤️"`))
+	job4, _ := jp.CreateJob("print_message", json.RawMessage(`"This is a test message"`))
+	jp.EnqueueJob(job4)
+	job5, _ := jp.CreateJob("print_message", json.RawMessage(`"Background processing works!"`))
+	jp.EnqueueJob(job5)
+	job6, _ := jp.CreateJob("print_message", json.RawMessage(`"Redis + Go = ❤️"`))
+	jp.EnqueueJob(job6)
 
 	log.Println("✅ Sample jobs enqueued!")
 }
@@ -757,32 +540,103 @@ func (jp *JobProcessor) handleEnqueueJob(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Create job
-	job := Job{
-		ID:        fmt.Sprintf("job_%d", time.Now().UnixNano()),
-		Type:      req.Type,
-		Data:      req.Data,
-		CreatedAt: time.Now(),
-	}
-
-	jobJSON, err := json.Marshal(job)
+	// Enqueue job using the new status-tracking system
+	job, err := jp.CreateJob(req.Type, req.Data)
 	if err != nil {
-		http.Error(w, "Failed to marshal job", http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to create job: %v", err), http.StatusInternalServerError)
 		return
 	}
-
-	// Enqueue job
-	err = jp.rdb.LPush(ctx, "job_queue", jobJSON).Err()
+	err = jp.EnqueueJob(job)
 	if err != nil {
-		http.Error(w, "Failed to enqueue job", http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("Failed to enqueue job: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	// Return response
 	response := EnqueueResponse{
 		Success: true,
-		JobID:   job.ID,
-		Message: fmt.Sprintf("Job enqueued successfully: %s", job.ID),
+		JobID:   "job_enqueued", // We'll get the actual ID from the EnqueueJob function
+		Message: "Job enqueued successfully",
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// handleGetJobStatus returns the status of a specific job
+func (jp *JobProcessor) handleGetJobStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	jobID := r.URL.Query().Get("job_id")
+	if jobID == "" {
+		http.Error(w, "Job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	job, err := jp.GetJob(jobID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get job: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(job)
+}
+
+// handleCreateJobMonitor creates a monitoring job for multiple jobs
+func (jp *JobProcessor) handleCreateJobMonitor(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		JobIDs      []string `json:"job_ids"`
+		Description string   `json:"description"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.JobIDs) == 0 {
+		http.Error(w, "At least one job ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Create monitor job data
+	monitorData := map[string]interface{}{
+		"job_ids":     req.JobIDs,
+		"description": req.Description,
+	}
+
+	monitorDataJSON, err := json.Marshal(monitorData)
+	if err != nil {
+		http.Error(w, "Failed to marshal monitor data", http.StatusInternalServerError)
+		return
+	}
+
+	// Enqueue the monitor job
+	job, err := jp.CreateJob("job_monitor", monitorDataJSON)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create monitor job: %v", err), http.StatusInternalServerError)
+		return
+	}
+	err = jp.EnqueueJob(job)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create monitor job: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := map[string]interface{}{
+		"success":     true,
+		"message":     "Job monitor created successfully",
+		"job_ids":     req.JobIDs,
+		"description": req.Description,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -801,11 +655,15 @@ func (jp *JobProcessor) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (jp *JobProcessor) StartHTTPServer(port string) {
 	http.HandleFunc("/enqueue", jp.handleEnqueueJob)
 	http.HandleFunc("/health", jp.handleHealth)
+	http.HandleFunc("/job/status", jp.handleGetJobStatus)
+	http.HandleFunc("/job/monitor", jp.handleCreateJobMonitor)
 
 	log.Printf("🌐 Starting HTTP server on port %s", port)
 	log.Printf("📋 Available endpoints:")
-	log.Printf("   POST /enqueue - Enqueue a new job")
-	log.Printf("   GET  /health  - Health check")
+	log.Printf("   POST /enqueue        - Enqueue a new job")
+	log.Printf("   GET  /health         - Health check")
+	log.Printf("   GET  /job/status     - Get job status")
+	log.Printf("   POST /job/monitor    - Create job monitor")
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal("Failed to start HTTP server:", err)
@@ -856,7 +714,7 @@ func main() {
 
 	// Start 3 background workers
 	processor.StartWorkers(10)
-
+	go processor.StartBulkJobWorker()
 	// Start the HTTP server
 	processor.StartHTTPServer(workerPort)
 }

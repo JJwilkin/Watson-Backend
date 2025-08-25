@@ -1212,16 +1212,28 @@ func getTransactionsByCategory(c *gin.Context) {
 	})
 }
 
-func syncPlaidAccounts(c *gin.Context) {
+func fetchAllNewTransactions(c *gin.Context) {
 	userIdInt, _, err := AuthMiddleware(c)
 	if err != nil {
 		return // AuthMiddleware already sent the response
 	}
+	var payload map[string]interface{}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "Invalid request body",
+		})
+		return
+	}
+	monthYear := GetCurrentMonthYear()
+	if monthYearFromPayload, exists := payload["month_year"]; exists {
+		monthYear = int(monthYearFromPayload.(float64))
+	}
 	jobData := map[string]interface{}{
-		"user_id": userIdInt,
+		"user_id":    userIdInt,
+		"month_year": monthYear,
 	}
 	enqueueRequest := map[string]interface{}{
-		"type": "sync_plaid_accounts",
+		"type": "fetch_all_new_transactions",
 		"data": jobData,
 	}
 
@@ -1375,7 +1387,7 @@ func main() {
 	router.POST("/transactions/process-daily-balance", processDailyBalance)
 	router.POST("/transactions/process-daily-balance/sync", processDailyBalanceSync)
 	router.POST("/transactions/by-category", getTransactionsByCategory)
-	router.POST("/transactions/sync-plaid-accounts", syncPlaidAccounts)
+	router.POST("/transactions/fetch-all-new-transactions", fetchAllNewTransactions)
 	router.GET("/transactions/all-accounts-synced", allAccountsSynced)
 
 	//Saving Goals

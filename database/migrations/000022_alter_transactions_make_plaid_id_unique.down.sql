@@ -1,0 +1,1 @@
+ALTER TABLE transactions DROP CONSTRAINT unique_plaid_transaction_id;

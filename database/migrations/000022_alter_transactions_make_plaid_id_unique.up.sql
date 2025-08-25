@@ -1,0 +1,1 @@
+ALTER TABLE transactions ADD CONSTRAINT unique_plaid_transaction_id UNIQUE (plaid_transaction_id);
