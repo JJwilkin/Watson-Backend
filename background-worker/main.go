@@ -273,7 +273,7 @@ func (jp *JobProcessor) fetchAllNewTransactions(job *Job) error {
 		}
 		jobDataJSON, _ := json.Marshal(jobData)
 		jobs = append(jobs, &Job{
-			Type: "fetch_all_new_transactions",
+			Type: "fetch_plaid_transactions",
 			Data: jobDataJSON,
 		})
 	}
